@@ -5947,6 +5947,10 @@ struct Model::Impl {
         // batches are copied whole before its routing is known, as far as the ring reaches (copy_ahead)
         std::vector<char> spec_k;
         bool spec(int k) const { return k >= 0 && (size_t) k < spec_k.size() && spec_k[(size_t) k]; }
+        // (DS4_SPEC_STAGED: the head batches go out only from the layer's own wait for its routing - once its
+        //  attention, routing and shared expert are queued - not as the layer before ends: their staging reads run on
+        //  the host thread, which would otherwise hold back the queueing of the next layer's attention)
+        bool spec_now = false;
         std::vector<int> routed_bounds;
         size_t skipped = 0, copied = 0;
         size_t pooled = 0;   // (DS4_FLOW_HELPER: EXL3 experts staged out of the helper's pool)
@@ -6104,6 +6108,16 @@ struct Model::Impl {
     // prompt 53.8 -> 210.0 tok/s, 8K 171.7 -> 330.1), else none, as before (kSkipFiles: run_dev_chunks decides).
     // DS4_SKIP_UNPICKED=alt (tests, one GPU): off and on by turns, a run each - the same logits both ways
     static constexpr int kSkipFiles = -1;
+    // DS4_SPEC_STAGED=1 (opt-in; run_dev_chunks): every chunk that skips its unpicked experts sends a layer's first
+    // batches out before its routing, staging included, from the layer's wait for its routing (Streamer::spec_now)
+    static bool spec_staged() {
+        static const bool on = [] {
+            const char* v = std::getenv("MAYA_DS4_SPEC_STAGED");
+            if (v == nullptr) v = std::getenv("DS4_SPEC_STAGED");
+            return v != nullptr && std::atoi(v) != 0;
+        }();
+        return on;
+    }
     static int skip_unpicked_rows() {
         static const int n = [] {
             const char* v = std::getenv("DS4_SKIP_UNPICKED");
@@ -6129,7 +6143,9 @@ struct Model::Impl {
             //  routing is known the rest skip their unpicked experts. The same slots, batches and sums: an expert no
             //  row picked adds nothing, copied or not)
             const bool skip_unpicked = S.skips(bt.k);
-            if (skip_unpicked && (bt.il != S.routed_layer || bt.k != S.routed_chunk) && !S.spec(bt.k)) break;
+            if (skip_unpicked && (bt.il != S.routed_layer || bt.k != S.routed_chunk) &&
+                !(S.spec(bt.k) && (S.spec_now || !spec_staged())))
+                break;
             const int half = (int) (S.cp % P);
             const Layer& l0 = L[(size_t) bt.il];
             // Preserve the original virtual slots, batches and accumulation order.
@@ -18426,6 +18442,13 @@ struct Model::Impl {
                 if (!flow_pump(c, err)) return false;
                 std::this_thread::yield();
             }
+        // (DS4_SPEC_STAGED: this layer's head batches - staged on this thread while the device runs what is queued)
+        if (!c.flow && spec_staged() && S.spec(wp.k)) {
+            S.spec_now = true;
+            const bool ok = copy_ahead(d, c, S, l.dev, err);
+            S.spec_now = false;
+            if (!ok) return false;
+        }
         CK(cudaStreamSynchronize(s));
         std::vector<int> b(c.bounds_pin, c.bounds_pin + n_vs + 1);
         // pv_n is this run's resident prefix: slots lent to buffers are streamed, not hits.
@@ -19014,10 +19037,17 @@ struct Model::Impl {
             const char* v = ds4_env("DS4_SPEC_HEAD");
             return v == nullptr || std::atoi(v) != 0;
         }();
+        // (DS4_SPEC_STAGED=1, opt-in: every chunk that skips its unpicked experts - for the shallow ring or for experts
+        //  read in place, HIP's sur - sends a layer's first batches out whole before its routing, staging too: the
+        //  helper's pool and the page cache are read on this thread, so the link carries the layer's head through its
+        //  attention instead of idling.  The same slots, batches and sums as without: an expert no row picked adds
+        //  nothing, copied or not.  An R9700 on Thunderbolt 5 + the 8060S's EXL3 pool: the 20K prompt waited ~8.5 s of
+        //  attention with the link idle)
         for (int k = 0; k < nk && !c.flow; ++k) {
             const bool few = run.T[(size_t) k] <= sur;
             S.skip_k[(size_t) k] = shallow || few;
-            S.spec_k[(size_t) k] = spec_head && shallow && !few && c.stage == nullptr;
+            S.spec_k[(size_t) k] = spec_staged() ? spec_head && (bool) S.skip_k[(size_t) k]
+                                               : spec_head && shallow && !few && c.stage == nullptr;
             if (S.spec_k[(size_t) k] && !c.spec_said) {
                 c.spec_said = true;
                 std::fprintf(stderr, "ds4: CUDA%d prompt copies: a layer's first %d experts go out before its routing "
