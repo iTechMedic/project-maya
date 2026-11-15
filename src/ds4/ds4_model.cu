@@ -9708,6 +9708,22 @@ struct Model::Impl {
         if (file_experts)
             std::fprintf(stderr, "ds4: experts loaded in %.1f s (%.1f GB of the CPU lane's read ahead)\n",
                          (now_ms() - t0) / 1000.0, warm / 1e9);
+        if (file_experts && file_hot_gb() > 0 && !L.empty()) {   // (DS4_FILE_HOT_GB: its experts read ahead in the
+            struct Region {                                         //  background, the first prompts' reads cached)
+                os::fd_t f;
+                uint64_t off, n;
+            };
+            std::vector<Region> rs;
+            (void) file_hot(L[0], 0);
+            for (const Layer& l : L)
+                for (int x = 0; x < l.n_exp && !l.region_bytes.empty(); ++x)
+                    if (file_hot(l, x))
+                        rs.push_back({pk.fds[(size_t) l.region_file[(size_t) x]], l.region_off[(size_t) x],
+                                      l.region_bytes[(size_t) x]});
+            std::thread([rs] {
+                for (const Region& r : rs) os::advise(r.f, r.off, r.n, true);
+            }).detach();
+        }
         return true;
     }
 
