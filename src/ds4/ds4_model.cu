@@ -6011,6 +6011,8 @@ struct Model::Impl {
         std::vector<int> routed_bounds;
         std::vector<char> light;   // (DS4_PROMPT_LIGHT) the routed layer's experts the helper computes: never copied
         size_t light_n = 0, light_rows = 0;
+        double light_wait = 0;   // (ms the host waited at layers' ends for the helper's light sums)
+        double light_send_ms = 0;   // (ms in light_send: the rows' gather wait and the helper's launches)
         size_t skipped = 0, copied = 0;
         size_t pooled = 0;   // (DS4_FLOW_HELPER: EXL3 experts staged out of the helper's pool)
         // (DS4_FLOW_STATS) the copied experts by how many of the chunk's rows (token picks) each serves: 1, 2, 3-4,
@@ -18882,7 +18884,11 @@ struct Model::Impl {
             }
         }
         const bool lt_sent = !lv.empty() && mi == 0;
-        if (lt_sent && !light_send(d, c, L0, lv, b, T, err)) return false;
+        if (lt_sent) {
+            const double ls0 = now_ms();
+            if (!light_send(d, c, L0, lv, b, T, err)) return false;
+            S.light_send_ms += now_ms() - ls0;
+        }
         if (S.skips(wp.k)) {
             S.routed_layer = L0.il;
             S.routed_chunk = wp.k;
@@ -18919,7 +18925,10 @@ struct Model::Impl {
         if (!run_vram(d, c, L0, l, l, b.data(), v_done, L0.pv_n, T, err)) return false;
         c.light = nullptr;
         if (lt_sent) {   // (the helper's sums into the lead's before the group's all-reduce)
-            if (cudaEventSynchronize(c.lt_h) != cudaSuccess || helper_dead.load()) {
+            const double lw0 = now_ms();
+            const bool lt_ok = cudaEventSynchronize(c.lt_h) == cudaSuccess;
+            S.light_wait += now_ms() - lw0;
+            if (!lt_ok || helper_dead.load()) {
                 err = "the helper's light experts of layer " + std::to_string(L0.il) + " failed (DS4_PROMPT_LIGHT)";
                 return false;
             }
@@ -19743,8 +19752,9 @@ struct Model::Impl {
         }
         if (!c.flow && S.light_n > 0)
             std::fprintf(stderr, "ds4 prompt batches, CUDA%d: %zu light experts (%zu rows) computed on the helper, not "
-                                 "copied (DS4_PROMPT_LIGHT=%d)\n",
-                         devs[(size_t) di].id, S.light_n, S.light_rows, prompt_light());
+                                 "copied (DS4_PROMPT_LIGHT=%d); the host waited %.2f s at layers' ends for their sums, %.2f s sending them\n",
+                         devs[(size_t) di].id, S.light_n, S.light_rows, prompt_light(), S.light_wait / 1000.0,
+                         S.light_send_ms / 1000.0);
         if (!c.flow && S.copied > 0 && std::getenv("DS4_FLOW_STATS") != nullptr)
             std::fprintf(stderr, "ds4 prompt batches, CUDA%d: copied experts by rows each: 1:%zu 2:%zu 3-4:%zu 5-8:%zu "
                                  "9-16:%zu 17-32:%zu 33-64:%zu 65+:%zu\n",
