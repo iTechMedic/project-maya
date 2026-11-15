@@ -387,12 +387,34 @@ struct Pack {
     std::vector<std::pair<uint8_t*, size_t>> maps;   // file -> its read-only mapping (map(): the experts in place)
     std::vector<os::fd_t> dfds;   // (gguf) file -> unbuffered (os::open_direct; kBadFd: buffered reads only)
     std::vector<os::fd_t> pfds;   // (gguf) file -> for reads from many threads at once (os::open_par)
+    // (DS4_FILE_DIRECT=1, an EXL3 pack in place) file -> unbuffered, for a prompt's streamed experts read from the
+    // files: straight from the disk into the readers' buffers in one request each, instead of through the page cache
+    // in readahead-sized pieces (kBadFd: buffered as before)
+    std::vector<os::fd_t> xdfds;
+    static bool file_direct() {
+        static const bool on = [] {
+            const char* v = std::getenv("MAYA_DS4_FILE_DIRECT");
+            if (v == nullptr) v = std::getenv("DS4_FILE_DIRECT");
+            return v != nullptr && std::atoi(v) != 0;
+        }();
+        return on;
+    }
+    // [off, off + n) of file into dst: unbuffered where xdfds has the file (through this thread's aligned bounce
+    // buffer), else - or should that read fail - buffered
+    bool read_x(int file, uint64_t off, uint64_t n, void* dst) const {
+        if ((size_t) file < xdfds.size() && xdfds[(size_t) file] != os::kBadFd) {
+            thread_local std::vector<uint8_t> bounce;
+            if (os::copy_direct(xdfds[(size_t) file], off, n, dst, bounce)) return true;
+        }
+        return read_at(file, off, n, dst);
+    }
 
     ~Pack() {
         for (auto& m : maps) os::unmap(m.first, m.second);
         for (os::fd_t fd : fds) os::close_fd(fd);
         for (os::fd_t fd : dfds) os::close_fd(fd);
         for (os::fd_t fd : pfds) os::close_fd(fd);
+        for (os::fd_t fd : xdfds) os::close_fd(fd);
     }
     // file i mapped whole, read-only (once; not thread-safe: called while loading)
     const uint8_t* map(int file) {
@@ -477,6 +499,8 @@ struct Pack {
                 dfds.push_back(os::open_direct(model_dir + "/" + files[i]));
                 pfds.push_back(os::open_par(model_dir + "/" + files[i]));
             }
+        else if (file_direct())
+            for (size_t i = 0; i < fds.size(); ++i) xdfds.push_back(os::open_direct(model_dir + "/" + files[i]));
         // the Engram tables
         std::FILE* e = std::fopen((d + "/engram.bin").c_str(), "rb");
         if (e == nullptr) {
@@ -6019,6 +6043,7 @@ struct Model::Impl {
                         continue;
                     }
                     if (x3_pool(l0, e) != nullptr) continue;   // (DS4_FLOW_HELPER: out of the pool, nothing to read)
+                    if (!pk.xdfds.empty()) continue;   // (DS4_FILE_DIRECT: read past the page cache - nothing to warm)
                     os::advise(pk.fds[(size_t) l0.region_file[(size_t) e]], l0.region_off[(size_t) e], l0.region_bytes[(size_t) e], true);
                     nb += (double) l0.region_bytes[(size_t) e];
                 }
@@ -6065,7 +6090,7 @@ struct Model::Impl {
             return true;
         }
         if (l.lay.fmt == gg::kFmtMXFP4) return l.nm > 1 ? read_mx_part(l, e, mi, si) : read_mx(l, e, si);
-        return pk.read_at(l.region_file[(size_t) e], l.region_off[(size_t) e], l.region_bytes[(size_t) e], si);
+        return pk.read_x(l.region_file[(size_t) e], l.region_off[(size_t) e], l.region_bytes[(size_t) e], si);
     }
     // (DS4_FLOW_HELPER_CHECK) an EXL3 item staged out of the pool against its file region repacked the same way
     bool pool_same(const Layer& l, int mi, int e, const uint8_t* si) const {
