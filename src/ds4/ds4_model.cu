@@ -5951,6 +5951,15 @@ struct Model::Impl {
         //  attention, routing and shared expert are queued - not as the layer before ends: their staging reads run on
         //  the host thread, which would otherwise hold back the queueing of the next layer's attention)
         bool spec_now = false;
+        // (DS4_STAGE_PROF) copy_ahead's host time: waiting for a staging part's last copies, staging batches (wall),
+        // queueing their copies; the staged items' own reader-thread times and bytes by source (helper pool / files)
+        double st_wait = 0, st_stage = 0, st_queue = 0, st_pool_b = 0, st_file_b = 0;
+        std::atomic<int64_t> st_pool_ns{0}, st_file_ns{0};
+        size_t st_pool_n = 0, st_file_n = 0;
+        // (DS4_STAGE_PROF) each batch's copy timeline on the copy stream: f once its ring part is free and the host
+        // started it, b once staged (its copies about to run), e once copied
+        std::vector<cudaEvent_t> ev_f, ev_b, ev_e;
+        std::vector<double> ev_bytes;
         std::vector<int> routed_bounds;
         size_t skipped = 0, copied = 0;
         size_t pooled = 0;   // (DS4_FLOW_HELPER: EXL3 experts staged out of the helper's pool)
@@ -6159,30 +6168,55 @@ struct Model::Impl {
             for (int m = 0; m < l0.nm; ++m)
                 if (member(l0, m).dev == di) mi = m;
             if (S.cp >= (size_t) P) CK(cudaStreamWaitEvent(c.cs, c.freed[half], 0));
+            static const bool tprof = std::getenv("DS4_STAGE_PROF") != nullptr;
+            cudaEvent_t evf = nullptr, evb = nullptr, eve = nullptr;
+            if (tprof && cudaEventCreate(&evf) == cudaSuccess && cudaEventCreate(&evb) == cudaSuccess &&
+                cudaEventCreate(&eve) == cudaSuccess) {
+                CK(cudaEventRecord(evf, c.cs));
+            } else evf = evb = eve = nullptr;
+            const double bytes0 = c.stream_bytes;
             uint8_t* sb = nullptr;   // in place: the batch's regions in the part's staging slots
             bool staged = false;     // (a batch of copies in place, alone: nothing to stage)
             for (int i = 0; i < bt.n && !staged; ++i)
                 staged = stage_needed(l0, l0.host_list[(size_t) (bt.j0 + i)]);
             // (DS4_FLOW_HELPER, EXL3: each item's source decided once - its staging and its copy must agree)
             std::vector<const uint8_t*> pool((size_t) bt.n, nullptr);
+            static const bool sprof = std::getenv("DS4_STAGE_PROF") != nullptr;
+            using sclk = std::chrono::steady_clock;
+            const auto secs = [](sclk::time_point a) { return std::chrono::duration<double>(sclk::now() - a).count(); };
             if (c.stage != nullptr && staged) {
+                const auto tw = sclk::now();
                 if (S.cp >= (size_t) P) CK(cudaEventSynchronize(c.filled[half]));   // (its last batch's copies out)
+                if (sprof) S.st_wait += secs(tw);
                 sb = c.stage + (size_t) half * (c.ring_n / P) * c.stage_stride;
                 for (int i = 0; i < bt.n; ++i) pool[(size_t) i] = x3_pool(l0, l0.host_list[(size_t) (bt.j0 + i)]);
                 std::atomic<bool> bad{false};
+                const auto ts = sclk::now();
                 c.readers->run(bt.n, [&](int i) {
                     if (!picked(i)) return;   // (DS4_SKIP_UNPICKED: an expert no token routed to)
+                    const auto ti = sclk::now();
                     if (!stage_streamed(l0, mi, l0.host_list[(size_t) (bt.j0 + i)], sb + (size_t) i * c.stage_stride,
                                         pool[(size_t) i]))
                         bad.store(true);
+                    if (sprof)
+                        (pool[(size_t) i] != nullptr ? S.st_pool_ns : S.st_file_ns)
+                            .fetch_add((int64_t) (secs(ti) * 1e9), std::memory_order_relaxed);
                 });
+                if (sprof) S.st_stage += secs(ts);
                 if (bad.load()) {
                     err = "reading layer " + std::to_string(l0.il) + "'s experts from the model's files failed";
                     return false;
                 }
             }
+            const auto tq = sclk::now();
+            if (evb != nullptr) CK(cudaEventRecord(evb, c.cs));
             for (int i = 0; i < bt.n; ++i) {
                 if (!picked(i)) { ++S.skipped; continue; }
+                if (sprof && sb != nullptr) {
+                    const int e = l0.host_list[(size_t) (bt.j0 + i)];
+                    if (pool[(size_t) i] != nullptr) ++S.st_pool_n, S.st_pool_b += (double) l0.blob;
+                    else ++S.st_file_n, S.st_file_b += (double) (l0.region_bytes.empty() ? l0.blob : l0.region_bytes[(size_t) e]);
+                }
                 if (skip_unpicked) ++S.copied;
                 uint8_t* dst = c.ring + ((size_t) half * (c.ring_n / P) + i) * c.ring_stride;
                 if (!copy_streamed(l0, mi, l0.host_list[(size_t) (bt.j0 + i)], sb != nullptr ? sb + (size_t) i * c.stage_stride
@@ -6191,6 +6225,12 @@ struct Model::Impl {
                     return false;
                 S.pooled += pool[(size_t) i] != nullptr;
                 c.stream_bytes += (double) unit(member(l0, mi));
+            }
+            if (sprof) S.st_queue += secs(tq);
+            if (eve != nullptr) {
+                CK(cudaEventRecord(eve, c.cs));
+                S.ev_f.push_back(evf), S.ev_b.push_back(evb), S.ev_e.push_back(eve);
+                S.ev_bytes.push_back(c.stream_bytes - bytes0);
             }
             CK(cudaEventRecord(c.filled[half], c.cs));
             ++S.cp;
@@ -18566,18 +18606,38 @@ struct Model::Impl {
         return true;
     }
 
-    // the CPU lane's experts of every layer, in index order, and each expert's virtual slot (before a chunk)
+    // DS4_POOL_FIRST=1 (opt-in; an EXL3 pack in place with DS4_FLOW_HELPER): a layer's streamed experts the helper's
+    // pool holds go first, those read from the model's files last - each part in index order. The batches copied before
+    // the layer's routing (DS4_SPEC_HEAD / DS4_SPEC_STAGED) are then the pool's, staged at memory speed instead of
+    // waiting on the disk, and the file reads come after the routing, where a chunk skips the ones no row picked.
+    // (The experts' outputs are summed in that order: the same sums in another order)
+    static bool pool_first() {
+        static const bool on = [] {
+            const char* v = std::getenv("MAYA_DS4_POOL_FIRST");
+            if (v == nullptr) v = std::getenv("DS4_POOL_FIRST");
+            return v != nullptr && std::atoi(v) != 0;
+        }();
+        return on;
+    }
+    // the CPU lane's experts of every layer, in index order (DS4_POOL_FIRST: the pool's first), and each expert's
+    // virtual slot - its place in that order (before a chunk)
     void plan_streams() {
+        std::vector<int> at;
         for (Layer& l : L) {
             if (l.mtp || l.vs_pin == nullptr) continue;
             l.host_list.clear();
             for (int e = 0; e < l.n_exp; ++e)
                 if (l.slot[(size_t) e] < 0 || l.slot[(size_t) e] >= l.pv_n) l.host_list.push_back(e);
+            if (pool_first())
+                std::stable_partition(l.host_list.begin(), l.host_list.end(),
+                                      [&](int e) { return x3_pool(l, e) != nullptr; });
+            at.assign((size_t) l.n_exp, -1);
+            for (size_t j = 0; j < l.host_list.size(); ++j) at[(size_t) l.host_list[j]] = (int) j;
             for (int m = 0; m < l.nm; ++m) {   // (a group's members: each its own copy)
                 Layer& x = member(l, m);
-                int j = 0;
                 for (int e = 0; e < l.n_exp; ++e)
-                    x.vs_pin[e] = l.slot[(size_t) e] >= 0 && l.slot[(size_t) e] < l.pv_n ? l.slot[(size_t) e] : l.pv_n + j++;
+                    x.vs_pin[e] = l.slot[(size_t) e] >= 0 && l.slot[(size_t) e] < l.pv_n ? l.slot[(size_t) e]
+                                                                                       : l.pv_n + at[(size_t) e];
             }
         }
     }
@@ -19300,6 +19360,39 @@ struct Model::Impl {
                                  "of the helper's pool%s\n",
                          devs[(size_t) di].id, S.copied, S.skipped, S.pooled,
                          flow_check_now && S.pooled > 0 ? " (DS4_FLOW_HELPER_CHECK: each compared with the files)" : "");
+        if (!c.flow && std::getenv("DS4_STAGE_PROF") != nullptr)
+            std::fprintf(stderr, "ds4 prompt staging, CUDA%d: waiting for a part's copies %.2f s, staging %.2f s (pool %zu "
+                                 "items %.2f GB, %.2f s of reader time; files %zu items %.2f GB, %.2f s), queueing copies "
+                                 "%.2f s\n",
+                         devs[(size_t) di].id, S.st_wait, S.st_stage, S.st_pool_n, S.st_pool_b / 1e9,
+                         S.st_pool_ns.load() / 1e9, S.st_file_n, S.st_file_b / 1e9, S.st_file_ns.load() / 1e9, S.st_queue);
+        if (!S.ev_e.empty()) {
+            // the copy stream's time: copying (b..e), idle while the ring part was busy or the host had not started the
+            // batch (e of the batch before .. f), idle while the host staged it (f..b); the copies' own rate
+            double busy = 0, idle_ring = 0, idle_stage = 0, bytes = 0, fast = 0, slow = 1e30;
+            float ms = 0;
+            CK(cudaEventSynchronize(S.ev_e.back()));
+            for (size_t i = 0; i < S.ev_e.size(); ++i) {
+                if (i > 0 && cudaEventElapsedTime(&ms, S.ev_e[i - 1], S.ev_f[i]) == cudaSuccess) idle_ring += std::max(0.f, ms);
+                if (cudaEventElapsedTime(&ms, S.ev_f[i], S.ev_b[i]) == cudaSuccess) idle_stage += std::max(0.f, ms);
+                if (cudaEventElapsedTime(&ms, S.ev_b[i], S.ev_e[i]) == cudaSuccess && ms > 0) {
+                    busy += ms;
+                    bytes += S.ev_bytes[i];
+                    const double r = S.ev_bytes[i] / (ms * 1e6);
+                    if (S.ev_bytes[i] > 0) fast = std::max(fast, r), slow = std::min(slow, r);
+                }
+            }
+            float span = 0;
+            cudaEventElapsedTime(&span, S.ev_f.front(), S.ev_e.back());
+            std::fprintf(stderr, "ds4 prompt copy stream, CUDA%d: %zu batches over %.2f s - copying %.2f s (%.2f GB, %.2f "
+                                 "GB/s; batches %.2f-%.2f GB/s), idle for the ring or the host's start %.2f s, idle for "
+                                 "staging %.2f s\n",
+                         devs[(size_t) di].id, S.ev_e.size(), span / 1e3, busy / 1e3, bytes / 1e9,
+                         busy > 0 ? bytes / (busy * 1e6) : 0.0, slow < 1e29 ? slow : 0.0, fast, idle_ring / 1e3,
+                         idle_stage / 1e3);
+            for (size_t i = 0; i < S.ev_e.size(); ++i) cudaEventDestroy(S.ev_f[i]), cudaEventDestroy(S.ev_b[i]), cudaEventDestroy(S.ev_e[i]);
+            S.ev_f.clear(), S.ev_b.clear(), S.ev_e.clear(), S.ev_bytes.clear();
+        }
         return true;
     }
 
