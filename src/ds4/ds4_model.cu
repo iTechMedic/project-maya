@@ -18710,10 +18710,17 @@ struct Model::Impl {
         // copies and sets alike (the same routing, the same choice), the lead sends their rows and adds the sums
         std::vector<char> lmask;
         std::vector<int> lv;   // their virtual slots, in slot order
-        if (light_ok(L0) && S.skips(wp.k) && !S.spec(wp.k) && !xsum) {
+        // (a chunk whose head batches went out before its routing - DS4_SPEC_HEAD / DS4_SPEC_STAGED - on one device:
+        //  the experts of those batches are copied already, so only the ones after them can be light; a group's
+        //  members copied ahead by their own pace, so there the head chunks keep every expert as before)
+        size_t j_from = 0;
+        if (S.spec(wp.k))
+            for (size_t q = S.kp; q < S.cp; ++q)
+                if (S.b[q].il == L0.il && S.b[q].k == wp.k) j_from = std::max(j_from, (size_t) (S.b[q].j0 + S.b[q].n));
+        if (light_ok(L0) && S.skips(wp.k) && (!S.spec(wp.k) || nm == 1) && !xsum) {
             const int R = prompt_light(), cap = light_cap();
             int rows = 0;
-            for (size_t j = 0; j < L0.host_list.size(); ++j) {
+            for (size_t j = j_from; j < L0.host_list.size(); ++j) {
                 const int v = L0.pv_n + (int) j, n = b[(size_t) v + 1] - b[(size_t) v];
                 if (n <= 0 || n > R || x3_pool(L0, L0.host_list[j]) == nullptr) continue;
                 if (rows + n > cap) break;
