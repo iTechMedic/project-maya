@@ -399,6 +399,17 @@ struct Pack {
         }();
         return on;
     }
+    // (DS4_FILE_HOT_GB set, DS4_FILE_COLD not drop: the experts it leaves out of the page cache read unbuffered)
+    static bool hot_direct() {
+        static const bool on = [] {
+            const char* h = std::getenv("MAYA_DS4_FILE_HOT_GB");
+            if (h == nullptr) h = std::getenv("DS4_FILE_HOT_GB");
+            const char* c = std::getenv("MAYA_DS4_FILE_COLD");
+            if (c == nullptr) c = std::getenv("DS4_FILE_COLD");
+            return h != nullptr && (c == nullptr || std::strcmp(c, "drop") != 0);
+        }();
+        return on;
+    }
     // [off, off + n) of file into dst: unbuffered where xdfds has the file (through this thread's aligned bounce
     // buffer), else - or should that read fail - buffered
     bool read_x(int file, uint64_t off, uint64_t n, void* dst) const {
@@ -499,7 +510,7 @@ struct Pack {
                 dfds.push_back(os::open_direct(model_dir + "/" + files[i]));
                 pfds.push_back(os::open_par(model_dir + "/" + files[i]));
             }
-        else if (file_direct())
+        else if (file_direct() || hot_direct())
             for (size_t i = 0; i < fds.size(); ++i) xdfds.push_back(os::open_direct(model_dir + "/" + files[i]));
         // the Engram tables
         std::FILE* e = std::fopen((d + "/engram.bin").c_str(), "rb");
@@ -6043,7 +6054,8 @@ struct Model::Impl {
                         continue;
                     }
                     if (x3_pool(l0, e) != nullptr) continue;   // (DS4_FLOW_HELPER: out of the pool, nothing to read)
-                    if (!pk.xdfds.empty()) continue;   // (DS4_FILE_DIRECT: read past the page cache - nothing to warm)
+                    // (DS4_FILE_DIRECT, or DS4_FILE_HOT_GB's rest: read past the page cache - nothing to warm)
+                    if (file_hot_gb() >= 0 ? !file_hot(l0, e) : !pk.xdfds.empty()) continue;
                     os::advise(pk.fds[(size_t) l0.region_file[(size_t) e]], l0.region_off[(size_t) e], l0.region_bytes[(size_t) e], true);
                     nb += (double) l0.region_bytes[(size_t) e];
                 }
@@ -6069,6 +6081,86 @@ struct Model::Impl {
             return nullptr;
         return l.helper[(size_t) e];
     }
+    // DS4_FILE_HOT_GB=<n> (an EXL3 pack in place): a prompt's experts read from the files split by the load's routing
+    // profile - the most-routed n GB of them through the page cache (where they stay), the rest past it: straight from
+    // the disk (DS4_FILE_COLD=direct, the default) or through the cache and dropped from it after the read (drop).  A
+    // prompt reads its file experts layer by layer; with more of them than the cache holds, the cache's LRU evicts each
+    // one before the next prompt comes back to it, and a repeated prompt rereads most of them from the disk
+    static double file_hot_gb() {
+        static const double gb = [] {
+            const char* v = std::getenv("MAYA_DS4_FILE_HOT_GB");
+            if (v == nullptr) v = std::getenv("DS4_FILE_HOT_GB");
+            return v != nullptr ? std::max(0.0, std::atof(v)) : -1.0;
+        }();
+        return gb;
+    }
+    static bool file_cold_drop() {
+        static const bool drop = [] {
+            const char* v = std::getenv("MAYA_DS4_FILE_COLD");
+            if (v == nullptr) v = std::getenv("DS4_FILE_COLD");
+            return v != nullptr && std::strcmp(v, "drop") == 0;
+        }();
+        return drop;
+    }
+    mutable std::once_flag fhot_once;
+    mutable std::vector<std::vector<char>> fhot;   // [layer][expert]: 1 - read through the page cache (DS4_FILE_HOT_GB)
+    bool file_hot(const Layer& l, int e) const {
+        std::call_once(fhot_once, [this] {
+            struct Item {
+                uint32_t n;
+                size_t il;
+                int e;
+                uint64_t bytes;
+            };
+            std::vector<Item> it;
+            fhot.assign(L.size(), {});
+            double all = 0, routed = 0;
+            for (size_t il = 0; il < L.size(); ++il) {
+                const Layer& y = L[il];
+                if (y.lay.fmt == gg::kFmtMXFP4 || y.region_bytes.empty()) continue;
+                fhot[il].assign((size_t) y.n_exp, 0);
+                for (int x = 0; x < y.n_exp; ++x) {
+                    if ((size_t) x < y.slot.size() && y.slot[(size_t) x] >= 0) continue;   // (in VRAM)
+                    if (x3_pool(y, x) != nullptr) continue;                                // (in the helper's pool)
+                    const size_t pi = (size_t) y.il * (size_t) g.n_exp + (size_t) x;
+                    const uint32_t n = pi < prof_load.size() ? prof_load[pi] : 0u;
+                    it.push_back({n, il, x, y.region_bytes[(size_t) x]});
+                    all += (double) y.region_bytes[(size_t) x];
+                    routed += n;
+                }
+            }
+            std::stable_sort(it.begin(), it.end(), [](const Item& a, const Item& b) { return a.n > b.n; });
+            const double cap = file_hot_gb() * 1e9;
+            double hb = 0, hr = 0;
+            size_t hn = 0;
+            for (const Item& x : it) {
+                if (hb + (double) x.bytes > cap) break;
+                fhot[x.il][(size_t) x.e] = 1;
+                hb += (double) x.bytes;
+                hr += x.n;
+                ++hn;
+            }
+            std::fprintf(stderr,
+                         "ds4: DS4_FILE_HOT_GB=%g: %zu of the %zu experts read from the files (%.1f of %.1f GB, %.0f%% of "
+                         "their routing) through the page cache; the rest %s\n",
+                         file_hot_gb(), hn, it.size(), hb / 1e9, all / 1e9, routed > 0 ? 100.0 * hr / routed : 0.0,
+                         file_cold_drop() ? "dropped from it after each read (DS4_FILE_COLD=drop)"
+                         : pk.xdfds.empty() ? "buffered (no unbuffered files)" : "straight from the disk");
+        });
+        const size_t il = (size_t) (&l - L.data());
+        return il < fhot.size() && (size_t) e < fhot[il].size() && fhot[il][(size_t) e] != 0;
+    }
+    // an EXL3 expert's file region into si: read_x, or (DS4_FILE_HOT_GB) by file_hot - through the page cache, or past it
+    bool read_region(const Layer& l, int e, uint8_t* si) const {
+        const int f = l.region_file[(size_t) e];
+        const uint64_t off = l.region_off[(size_t) e], n = l.region_bytes[(size_t) e];
+        if (file_hot_gb() < 0) return pk.read_x(f, off, n, si);
+        if (file_hot(l, e)) return pk.read_at(f, off, n, si);
+        if (!file_cold_drop()) return pk.read_x(f, off, n, si);
+        const bool ok = pk.read_at(f, off, n, si);
+        os::advise(pk.fds[(size_t) f], off, n, false);
+        return ok;
+    }
     // pool: x3_pool's blob (decided once for the item - stage_streamed and copy_streamed must agree), staged as the
     // slot's layout: the blob, or member mi's part cut from it (blob_to_half) - one copy into the ring
     bool stage_streamed(const Layer& l, int mi, int e, uint8_t* si, const uint8_t* pool = nullptr) const {
@@ -6090,7 +6182,7 @@ struct Model::Impl {
             return true;
         }
         if (l.lay.fmt == gg::kFmtMXFP4) return l.nm > 1 ? read_mx_part(l, e, mi, si) : read_mx(l, e, si);
-        return pk.read_x(l.region_file[(size_t) e], l.region_off[(size_t) e], l.region_bytes[(size_t) e], si);
+        return read_region(l, e, si);
     }
     // (DS4_FLOW_HELPER_CHECK) an EXL3 item staged out of the pool against its file region repacked the same way
     bool pool_same(const Layer& l, int mi, int e, const uint8_t* si) const {
