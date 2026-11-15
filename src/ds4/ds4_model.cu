@@ -19295,10 +19295,19 @@ struct Model::Impl {
         //  attention instead of idling.  The same slots, batches and sums as without: an expert no row picked adds
         //  nothing, copied or not.  An R9700 on Thunderbolt 5 + the 8060S's EXL3 pool: the 20K prompt waited ~8.5 s of
         //  attention with the link idle)
+        // (MAYA_DS4_SPEC_STAGED_MIN=R: only chunks of at least R rows - a short chunk picks most experts for a few rows,
+        //  which DS4_PROMPT_LIGHT computes on the helper instead of copying, and a head copied before the routing can
+        //  not be light; R9700 + 8060S, DS4_PROMPT_LIGHT=64: a 2K prompt 10.8 s with the head, 9.4 s without, 8K and
+        //  20K faster with it)
+        static const int spec_min = [] {
+            const char* v = std::getenv("MAYA_DS4_SPEC_STAGED_MIN");
+            if (v == nullptr) v = std::getenv("DS4_SPEC_STAGED_MIN");
+            return v != nullptr ? std::max(0, std::atoi(v)) : 0;
+        }();
         for (int k = 0; k < nk && !c.flow; ++k) {
             const bool few = run.T[(size_t) k] <= sur;
             S.skip_k[(size_t) k] = shallow || few;
-            S.spec_k[(size_t) k] = spec_staged() ? spec_head && (bool) S.skip_k[(size_t) k]
+            S.spec_k[(size_t) k] = spec_staged() ? spec_head && (bool) S.skip_k[(size_t) k] && run.T[(size_t) k] >= spec_min
                                                : spec_head && shallow && !few && c.stage == nullptr;
             if (S.spec_k[(size_t) k] && !c.spec_said) {
                 c.spec_said = true;
