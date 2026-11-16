@@ -5811,6 +5811,99 @@ struct Model::Impl {
         }
         return true;
     }
+    // ---- the busy EXL3 experts (run_set, DS4_X3_FAT_ROWS=N; unset / 0: off): an expert of N rows or more decoded to
+    // FP16 once (x3::reconstruct_inner_rows: W' alone, the rows rotated instead) and multiplied by the library's GEMM (hipBLASLt on
+    // AMD), where the tiles decode its weights again for every 16 / 32 of its rows (a 20K chunk gives an expert ~320 on
+    // average).  VRAM's experts and the streamed ones alike (a ring slot is freed after its set, on the same stream).
+    // The same products; the sums in the GEMM's order, so not bit for bit
+    std::atomic<long long> x3_fat_n{0};   // (the busy EXL3 experts run since DS4_PROF's last report)
+    static int x3_fat_rows() {
+        static const int n = [] {
+            const char* v = std::getenv("MAYA_DS4_X3_FAT_ROWS");
+            if (v == nullptr) v = std::getenv("DS4_X3_FAT_ROWS");
+            return v != nullptr ? std::max(0, std::atoi(v)) : 0;
+        }();
+        return n;
+    }
+    bool x3_fat_ready(Dev& d, Chunk& c, int D, int FF) {
+        if (x3_fat_rows() <= 0 || c.fat_off) return false;
+        if (c.fat_w != nullptr) return FF <= c.fat_ff;   // (wider than allocated: the tiles take it)
+        const int di = (int) (&d - devs.data());
+        for (const Layer& l0 : L)
+            for (int m = 0; m < l0.nm; ++m)
+                if (member(l0, m).dev == di) FF = std::max(FF, member(l0, m).ffn);
+        static const int R = std::getenv("DS4_FAT_PIECE") ? std::max(64, std::atoi(std::getenv("DS4_FAT_PIECE"))) : 1024;
+        // (gate, up and down's W' side by side; the rows rotated in, FP16; gate's and up's F32 outputs)
+        const double mb = ((double) 3 * FF * D * 2 + (double) R * D * 2 + (double) R * 2 * FF * 4) / 1e6;
+        if (cudaSetDevice(d.id) != cudaSuccess || cudaMalloc(&c.fat_w, (size_t) 3 * FF * D * 2) != cudaSuccess ||
+            cudaMalloc(&c.fat_x, (size_t) R * D * 2) != cudaSuccess ||
+            cudaMalloc(&c.fat_gu, (size_t) R * 2 * FF * 4) != cudaSuccess) {
+            cudaGetLastError();
+            std::fprintf(stderr, "ds4: CUDA%d: no VRAM for the busy EXL3 experts' path (%.0f MB): the tiles take them\n",
+                         d.id, mb);
+            c.fat_off = true;
+            return false;
+        }
+        c.fat_r = R;
+        c.fat_ff = FF;
+        std::fprintf(stderr, "ds4: CUDA%d busy EXL3 experts (%d rows or more) decoded to FP16 once and multiplied as "
+                     "GEMMs, %d rows a piece (%.0f MB)\n", d.id, x3_fat_rows(), R, mb);
+        return true;
+    }
+    // part r (0 gate, 1 up, 2 down) of an EXL3 expert's blob as a matrix of k inputs and n outputs
+    static x3::Mat x3_part(const x3::ExpertLayout& lay, const uint8_t* blob, int r, int k, int n) {
+        x3::Mat m;
+        m.trellis = (const uint32_t*) (blob + lay.trellis[r]);
+        m.suh = (const uint16_t*) (blob + lay.suh[r]);
+        m.svh = (const uint16_t*) (blob + lay.svh[r]);
+        m.k = k;
+        m.n = n;
+        m.k2 = lay.k2[r];
+        m.cb = lay.cb;
+        return m;
+    }
+    // y[r][c] = x16[r] . W[c] (W FP16 [n][k], x16 FP16 rows ldx apart, y F32 rows ldy apart), r < t
+    bool x3_fat_gemm(Dev& d, Chunk& c, const uint16_t* W, int n, int k, const uint16_t* x16, int ldx, int t, float* y,
+                     int ldy, std::string& err) {
+        if (lt::gemm(d.st, W, n, k, x16, ldx, t, y, ldy)) return true;   // (AMD: hipBLASLt)
+        const float one = 1.0f, zero = 0.0f;
+        if (cublasGemmEx(c.blas, CUBLAS_OP_T, CUBLAS_OP_N, n, t, k, &one, W, CUDA_R_16F, k, x16, CUDA_R_16F, ldx, &zero,
+                         y, CUDA_R_32F, ldy, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP) == CUBLAS_STATUS_SUCCESS)
+            return true;
+        err = "the busy EXL3 experts' path: the GEMM failed";
+        return false;
+    }
+    // one busy EXL3 expert over its sorted rows [row, row + n) (the set's first row a): h16 and y at its local rows,
+    // as x3::set_gate_up / set_down write them
+    // (x W = H(H(x * suh) W') * svh: the plain decode of W' at the memory's speed - reconstruct_rows' full W costs a
+    //  Hadamard over the k x n weight, 1.5-3 ms an expert on an R9700, more than the tiles' own decodes - and the
+    //  rotations on the rows instead: rows_rot_f16 in, rows_rot_out out; the SwiGLU between them in F32)
+    bool x3_fat_expert(Dev& d, Chunk& c, const x3::ExpertLayout& lay, const uint8_t* blob, int row, int n, int a, int D,
+                       int FF, float limit, std::string& err) {
+        cudaStream_t s = d.st;
+        const x3::Mat mg = x3_part(lay, blob, 0, D, FF), mu = x3_part(lay, blob, 1, D, FF), md = x3_part(lay, blob, 2, FF, D);
+        uint16_t *wg = c.fat_w, *wu = c.fat_w + (size_t) FF * D, *wd = c.fat_w + (size_t) 2 * FF * D;
+        x3::reconstruct_inner_rows(mg, wg, s);
+        x3::reconstruct_inner_rows(mu, wu, s);
+        x3::reconstruct_inner_rows(md, wd, s);
+        float *G = c.fat_gu, *U = c.fat_gu + (size_t) c.fat_r * FF;
+        for (int p0 = 0; p0 < n; p0 += c.fat_r) {
+            const int np = std::min(c.fat_r, n - p0);
+            const int* idx = c.row_tok + row + p0;
+            x3::rows_rot_f16(c.x, D, idx, np, D, mg.suh, c.fat_x, s);
+            if (!x3_fat_gemm(d, c, wg, FF, D, c.fat_x, D, np, G, FF, err)) return false;
+            x3::rows_rot_f16(c.x, D, idx, np, D, mu.suh, c.fat_x, s);
+            if (!x3_fat_gemm(d, c, wu, FF, D, c.fat_x, D, np, U, FF, err)) return false;
+            x3::rows_rot_out(G, FF, np, FF, mg.svh, s);
+            x3::rows_rot_out(U, FF, np, FF, mu.svh, s);
+            swiglu(G, U, np * FF, limit, G, s);   // (in place: each value from its own gate and up)
+            x3::rows_rot_f16(G, FF, nullptr, np, FF, md.suh, c.fat_x, s);
+            float* y = c.y + (size_t) (row - a + p0) * D;
+            if (!x3_fat_gemm(d, c, wd, D, FF, c.fat_x, FF, np, y, D, err)) return false;
+            x3::rows_rot_out(y, D, np, D, md.svh, s);
+        }
+        return true;
+    }
     // y[r][c] = alpha x16[r] . W[c] for F16 weights W [n][k] (the indexer's weights_proj)
     bool gemm_f16w(Chunk& c, const uint16_t* W, int n, int k, const uint16_t* x16, int ldx, int rows, float alpha,
                    float* y, int ldy, std::string& err) {
@@ -7139,8 +7232,39 @@ struct Model::Impl {
                                       d.st, err))
                             return false;
                 } else {
-                    x3::set_gate_up(sa, c.x, D, c.row_tok + a, c.h16, FF, d.st);
-                    x3::set_down(sa, c.h16, FF, c.y, D, d.st);
+                    // (DS4_X3_FAT_ROWS: the set's busy experts as FP16 GEMMs, the runs between them through the tiles)
+                    std::vector<int> xfat;
+                    if (x3_fat_rows() > 0 && max_rows >= x3_fat_rows() && sa.mix.n == 0 && sa.lay.fmt == 0 && l.nm == 1 &&
+                        x3_fat_ready(d, c, D, FF))
+                        for (int i = i0; i < j; ++i)
+                            if (b[i + 1] - b[i] >= x3_fat_rows()) xfat.push_back(i);
+                    if (xfat.empty()) {
+                        x3::set_gate_up(sa, c.x, D, c.row_tok + a, c.h16, FF, d.st);
+                        x3::set_down(sa, c.h16, FF, c.y, D, d.st);
+                    } else {
+                        const auto tiles = [&](int u0, int u1) {   // experts [u0, u1) through the tile kernels
+                            int mr = 0;
+                            for (int i = u0; i < u1; ++i) mr = std::max(mr, b[i + 1] - b[i]);
+                            if (mr <= 0) return;
+                            x3::SetArgs s2 = sa;
+                            s2.wbase = wbase + (size_t) (u0 - wb0) * stride;
+                            s2.n_exp = u1 - u0;
+                            s2.bounds = d_bounds + u0;   // (row0 stays a: the local rows as the whole set's)
+                            s2.max_rows = mr;
+                            x3::set_gate_up(s2, c.x, D, c.row_tok + a, c.h16, FF, d.st);
+                            x3::set_down(s2, c.h16, FF, c.y, D, d.st);
+                        };
+                        int u0 = i0;
+                        for (const int i : xfat) {
+                            tiles(u0, i);
+                            if (!x3_fat_expert(d, c, sa.lay, wbase + (size_t) (i - wb0) * stride, b[i], b[i + 1] - b[i],
+                                               a, D, FF, sa.limit, err))
+                                return false;
+                            u0 = i + 1;
+                        }
+                        tiles(u0, j);
+                        x3_fat_n.fetch_add((long long) xfat.size());
+                    }
                 }
                 if (dump_y != nullptr && (dump_y_layer < 0 || l.il == dump_y_layer)) {
                     std::vector<int> bb(b + i0, b + j + 1);
@@ -21652,6 +21776,9 @@ struct Model::Impl {
                          "(with the waits for streamed ones), between layers %.0f ms\n",
                          n, cprof_ms[4] + cprof_ms[5] + cprof_ms[6] + cprof_ms[7] + cprof_ms[1], cprof_ms[2],
                          cprof_ms[3], cprof_ms[0]);
+            if (x3_fat_n.load() > 0)
+                std::fprintf(stderr, "ds4 prompt: %lld busy EXL3 experts as FP16 GEMMs (DS4_X3_FAT_ROWS=%d)\n",
+                             x3_fat_n.exchange(0), x3_fat_rows());
             std::fprintf(stderr,
                          "ds4 prompt attention GPU time: Engram + mixing + projections %.0f ms, compression + indexer "
                          "%.0f ms, q %.0f ms, sparse attention %.0f ms, output projections %.0f ms\n",
