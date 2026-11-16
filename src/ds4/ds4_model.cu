@@ -800,6 +800,18 @@ struct Chunk {
     cudaEvent_t lt_g = nullptr, lt_h = nullptr;
     uint16_t* lt_hh = nullptr;
     int* lt_ident = nullptr;
+    // (DS4_PROMPT_LIGHT_FILES) the light experts read from the model's files: their slots (pinned, mapped - the helper
+    // reads each blob there), lf_stride apart; their readers; the layer's job in flight (the reads, then the helper's
+    // launches on lt_st after the pool's) and its event, recorded behind them; the job's read time and error.  (The
+    // job is declared after its readers: destroyed first, its destructor waiting for it)
+    uint8_t* lf_stage = nullptr;
+    size_t lf_stride = 0;
+    int lf_slots_n = 0;
+    std::unique_ptr<Pool> lf_readers;
+    cudaEvent_t lf_h = nullptr;
+    double lf_read_ms = 0;
+    std::string lf_err;
+    std::future<bool> lf_job;
     unsigned arb_seq = 0;        // the group's chunk all-reduces
     ArAux ar_aux;                // (allreduce_dma's pieces: its copies out on a stream of their own)
     // the attention's sums slab by slab beside the next slab's compute: a stream of their own (its own ArAux), and
@@ -6106,6 +6118,10 @@ struct Model::Impl {
         size_t light_n = 0, light_rows = 0;
         double light_wait = 0;   // (ms the host waited at layers' ends for the helper's light sums)
         double light_send_ms = 0;   // (ms in light_send: the rows' gather wait and the helper's launches)
+        // (DS4_PROMPT_LIGHT_FILES) the light experts read from the files: how many, their rows and bytes, the readers'
+        // wall time and the host's wait at layers' ends for their job
+        size_t lf_n = 0, lf_rows = 0;
+        double lf_bytes = 0, lf_read_ms = 0, lf_wait = 0;
         size_t skipped = 0, copied = 0;
         size_t pooled = 0;   // (DS4_FLOW_HELPER: EXL3 experts staged out of the helper's pool)
         // (DS4_FLOW_STATS) the copied experts by how many of the chunk's rows (token picks) each serves: 1, 2, 3-4,
@@ -7065,10 +7081,105 @@ struct Model::Impl {
         return prompt_light() > 0 && helper_id >= 0 && flow_helper && file_experts && !helper_dead.load() &&
                L0.lay.fmt != gg::kFmtMXFP4 && L0.n_cls == 1 && !L0.helper.empty();
     }
-    // (the lead) the light experts' rows out and the helper's work in: lv their virtual slots, b the chunk's bounds
-    bool light_send(Dev& d, Chunk& c, const Layer& L0, const std::vector<int>& lv, const std::vector<int>& b, int T,
-                    std::string& err) {
-        const int D = g.dim, cap = light_cap(), R = prompt_light(), nr = T * L0.k_exp;
+    // DS4_PROMPT_LIGHT_FILES=<R> (opt-in, with DS4_PROMPT_LIGHT; 0/unset: off): a chunk's streamed experts the helper's
+    // pool does not hold - read from the model's files - that at most R of its rows pick are light too.  Each is read
+    // (through the page cache or past it, as DS4_FILE_HOT_GB says) and repacked into a pinned, mapped slot by readers
+    // of their own while the lead goes on with the layer, then the helper runs the same set kernels over it, on its
+    // light stream after the pool's.  Such an expert serves a few rows yet costs its whole blob over the link and a
+    // read on the staging path (R9700 + 8060S, 2.25 bpw: a 2K prompt copied 30.5 GB, 16.2 GB of it ~1,720 file experts
+    // carrying <3% of the routing); here its read runs beside the layer and nothing crosses the link.  Not bit for bit
+    // (DS4_PROMPT_LIGHT's sums).  DS4_PROMPT_LIGHT_FILES_SLOTS (64): the experts a layer sends this way (their slots'
+    // pinned RAM: ~9.4 MB each at 2.25 bpw), DS4_PROMPT_LIGHT_FILES_CAP (2048): their rows a layer,
+    // DS4_PROMPT_LIGHT_FILES_READERS (8): their readers
+    static int light_files() {
+        static const int r = [] {
+            const char* v = ds4_env("DS4_PROMPT_LIGHT_FILES");
+            return v != nullptr ? std::max(0, std::min(512, std::atoi(v))) : 0;
+        }();
+        return r;
+    }
+    static int lf_slots() {
+        static const int n = [] {
+            const char* v = ds4_env("DS4_PROMPT_LIGHT_FILES_SLOTS");
+            return v != nullptr ? std::max(1, std::min(1024, std::atoi(v))) : 64;
+        }();
+        return n;
+    }
+    static int lf_cap() {
+        static const int n = [] {
+            const char* v = ds4_env("DS4_PROMPT_LIGHT_FILES_CAP");
+            return v != nullptr ? std::max(64, std::atoi(v)) : 2048;
+        }();
+        return n;
+    }
+    static int lf_readers_n() {
+        static const int n = [] {
+            const char* v = ds4_env("DS4_PROMPT_LIGHT_FILES_READERS");
+            return v != nullptr ? std::max(1, std::min(64, std::atoi(v))) : 8;
+        }();
+        return n;
+    }
+    // (the light rows' room: the pool's cap, and the files' beside it)
+    static int light_rows_cap() { return light_cap() + (light_files() > 0 ? lf_cap() : 0); }
+    bool lf_ok(const Layer& L0, int e) const {
+        return light_files() > 0 && x3_pool(L0, e) == nullptr && (size_t) e < L0.region_bytes.size() &&
+               L0.region_bytes[(size_t) e] > 0 && !L0.region_file.empty();
+    }
+    // (DS4_PROMPT_LIGHT_FILES, the job's thread) experts fe of L0 - light entries q0, q0 + 1, ... of the layer's set -
+    // read and repacked into the chunk's slots, then the helper's kernels over them on lt_st, lf_h recorded behind
+    bool lf_run(Chunk& c, const Layer& L0, const std::vector<int>& fe, size_t q0) {
+        const double t0 = now_ms();
+        std::atomic<bool> bad{false};
+        // (the pool's own threads only - this one is new each layer, and each reader keeps an expert-sized region and
+        //  bounce buffer of its own)
+        const std::function<void(int)> rd = [&](int i) {
+            thread_local std::vector<uint8_t> region;
+            const int e = fe[(size_t) i];
+            region.resize((size_t) L0.region_bytes[(size_t) e]);
+            if (!read_region(L0, e, region.data())) {
+                bad.store(true);
+                return;
+            }
+            repack(L0, e, region.data(), c.lf_stage + (size_t) i * c.lf_stride);
+        };
+        c.lf_readers->start((int) fe.size(), rd);
+        c.lf_readers->wait();
+        c.lf_read_ms = now_ms() - t0;
+        if (bad.load()) {
+            c.lf_err = "reading layer " + std::to_string(L0.il) + "'s light experts from the model's files failed";
+            return false;
+        }
+        const int D = g.dim, e0 = x3::launch_errors();
+        if (cudaSetDevice(helper_id) != cudaSuccess) {
+            c.lf_err = "DS4_PROMPT_LIGHT_FILES: the helper could not be selected";
+            return false;
+        }
+        for (size_t i = 0; i < fe.size(); ++i) {
+            const size_t q = q0 + i;
+            x3::SetArgs sa;
+            sa.wbase = c.lf_stage + i * c.lf_stride;
+            sa.stride = L0.blob;
+            sa.lay = L0.lay;
+            sa.n_exp = 1;
+            sa.bounds = c.lt_hb + q;
+            sa.row0 = c.lt_hb[q];
+            sa.max_rows = c.lt_hb[q + 1] - c.lt_hb[q];
+            sa.n_embd = D;
+            sa.n_ff = g.ff;
+            sa.limit = g.lim;
+            x3::set_gate_up(sa, c.lt_hx, D, c.lt_ident + sa.row0, c.lt_hh, g.ff, c.lt_st);
+            x3::set_down(sa, c.lt_hh, g.ff, c.lt_hy + (size_t) sa.row0 * D, D, c.lt_st);
+        }
+        const bool ok = cudaEventRecord(c.lf_h, c.lt_st) == cudaSuccess && cudaGetLastError() == cudaSuccess &&
+                        x3::launch_errors() == e0;
+        if (!ok) c.lf_err = "DS4_PROMPT_LIGHT_FILES: the helper's launches failed (layer " + std::to_string(L0.il) + ")";
+        return ok;
+    }
+    // (the lead) the light experts' rows out and the helper's work in: lv their virtual slots - the pool's first, then
+    // from n_pool on the files' (DS4_PROMPT_LIGHT_FILES: their job started here) - and b the chunk's bounds
+    bool light_send(Dev& d, Chunk& c, const Layer& L0, const std::vector<int>& lv, size_t n_pool,
+                    const std::vector<int>& b, int T, std::string& err) {
+        const int D = g.dim, cap = light_rows_cap(), R = std::max(prompt_light(), light_files()), nr = T * L0.k_exp;
         cudaStream_t s = d.st;
         if (c.lt_hx == nullptr) {   // (once: the lead's buffers, the helper's stream and scratch)
             bool ok = cudaHostAlloc((void**) &c.lt_hx, (size_t) cap * D * 4, cudaHostAllocMapped | cudaHostAllocPortable) ==
@@ -7080,12 +7191,23 @@ struct Model::Impl {
                       cudaHostAlloc((void**) &c.lt_prow, (size_t) cap * 4, cudaHostAllocDefault) == cudaSuccess &&
                       cudaMalloc((void**) &c.lt_dprow, (size_t) cap * 4) == cudaSuccess &&
                       cudaEventCreateWithFlags(&c.lt_g, cudaEventDisableTiming) == cudaSuccess;
+            if (ok && light_files() > 0) {   // (the files' slots, as large as any layer's blob, and their readers)
+                size_t mb = 0;
+                for (const Layer& y : L)
+                    if (!y.mtp && y.lay.fmt != gg::kFmtMXFP4) mb = std::max<size_t>(mb, y.blob);
+                c.lf_stride = (mb + 4095) & ~(size_t) 4095;
+                c.lf_slots_n = lf_slots();
+                ok = c.lf_stride > 0 && cudaHostAlloc((void**) &c.lf_stage, (size_t) c.lf_slots_n * c.lf_stride,
+                                                      cudaHostAllocMapped | cudaHostAllocPortable) == cudaSuccess;
+                if (ok) c.lf_readers = std::make_unique<Pool>(lf_readers_n(), std::vector<int>{}, 50);
+            }
             ok = ok && cudaSetDevice(helper_id) == cudaSuccess &&
                  cudaStreamCreateWithFlags(&c.lt_st, cudaStreamNonBlocking) == cudaSuccess &&
                  (pk.gguf ? gg::prepare(c.lt_st) : x3::prepare(c.lt_st)) &&
                  cudaMalloc((void**) &c.lt_hh, (size_t) R * g.ff * 2) == cudaSuccess &&
                  cudaMalloc((void**) &c.lt_ident, (size_t) cap * 4) == cudaSuccess &&
-                 cudaEventCreateWithFlags(&c.lt_h, cudaEventDisableTiming) == cudaSuccess;
+                 cudaEventCreateWithFlags(&c.lt_h, cudaEventDisableTiming) == cudaSuccess &&
+                 (light_files() <= 0 || cudaEventCreateWithFlags(&c.lf_h, cudaEventDisableTiming) == cudaSuccess);
             if (ok) {
                 std::vector<int> id((size_t) cap);
                 for (int i = 0; i < cap; ++i) id[(size_t) i] = i;
@@ -7093,12 +7215,19 @@ struct Model::Impl {
             }
             ok = cudaSetDevice(d.id) == cudaSuccess && ok;
             if (!ok) {
-                err = "DS4_PROMPT_LIGHT: its buffers (" + std::to_string((size_t) cap * D * 8 >> 20) + " MB pinned) failed";
+                err = "DS4_PROMPT_LIGHT: its buffers (" +
+                      std::to_string(((size_t) cap * D * 8 + (size_t) c.lf_slots_n * c.lf_stride) >> 20) +
+                      " MB pinned) failed";
                 return false;
             }
             std::fprintf(stderr, "ds4: DS4_PROMPT_LIGHT=%d: a prompt chunk's experts of at most %d rows from the helper's "
                                  "pool computed on CUDA%d, not copied (up to %d rows a layer)\n",
-                         R, R, helper_id, cap);
+                         prompt_light(), prompt_light(), helper_id, light_cap());
+            if (light_files() > 0)
+                std::fprintf(stderr, "ds4: DS4_PROMPT_LIGHT_FILES=%d: its experts read from the files too - up to %d a "
+                                     "layer (%.0f MB pinned), %d rows, %d readers\n",
+                             light_files(), c.lf_slots_n, (double) c.lf_slots_n * c.lf_stride / 1048576.0, lf_cap(),
+                             lf_readers_n());
         }
         if (nr > c.lt_lcap) {   // (the sorted rows' map: the chunk's rows grow it)
             if (c.lt_lidx != nullptr) cudaFreeHost(c.lt_lidx);
@@ -7130,7 +7259,7 @@ struct Model::Impl {
         CK(cudaEventSynchronize(c.lt_g));   // (the rows are in host memory: the helper reads them there)
         const int e0 = x3::launch_errors();
         bool ok = cudaSetDevice(helper_id) == cudaSuccess;
-        for (size_t q = 0; ok && q < lv.size(); ++q) {
+        for (size_t q = 0; ok && q < n_pool; ++q) {
             const int e = L0.host_list[(size_t) (lv[q] - L0.pv_n)];
             x3::SetArgs sa;
             sa.wbase = x3_pool(L0, e);
@@ -7154,6 +7283,26 @@ struct Model::Impl {
              x3::launch_errors() == e0;
         ok = cudaSetDevice(d.id) == cudaSuccess && ok;
         if (!ok) err = "DS4_PROMPT_LIGHT: the helper's launches failed (layer " + std::to_string(L0.il) + ")";
+        if (ok && n_pool < lv.size()) {   // (DS4_PROMPT_LIGHT_FILES: the files' experts read and run beside the layer)
+            std::vector<int> fe;
+            fe.reserve(lv.size() - n_pool);
+            for (size_t q = n_pool; q < lv.size(); ++q) fe.push_back(L0.host_list[(size_t) (lv[q] - L0.pv_n)]);
+            c.lf_err.clear();
+            const Layer* lp = &L0;
+            c.lf_job = std::async(std::launch::async,
+                                  [this, &c, lp, fe = std::move(fe), n_pool]() { return lf_run(c, *lp, fe, n_pool); });
+        }
+        return ok;
+    }
+    // (the lead, at the layer's end) the files' light job joined and its kernels waited for: false on a failure (err)
+    bool lf_join(Chunk& c, Streamer& S, std::string& err) {
+        if (!c.lf_job.valid()) return true;
+        const double w0 = now_ms();
+        bool ok = c.lf_job.get();
+        ok = ok && cudaEventSynchronize(c.lf_h) == cudaSuccess;
+        S.lf_wait += now_ms() - w0;
+        S.lf_read_ms += c.lf_read_ms;
+        if (!ok) err = c.lf_err.empty() ? std::string("DS4_PROMPT_LIGHT_FILES: the helper's work failed") : c.lf_err;
         return ok;
     }
     bool run_vram(Dev& d, Chunk& c, const Layer& L0, const Layer& l, const Layer& x, const int* b, int i0, int i1, int T,
@@ -19064,7 +19213,8 @@ struct Model::Impl {
         // helper computes them instead of the members copying them over their links - every member drops them from its
         // copies and sets alike (the same routing, the same choice), the lead sends their rows and adds the sums
         std::vector<char> lmask;
-        std::vector<int> lv;   // their virtual slots, in slot order
+        std::vector<int> lv;   // their virtual slots, in slot order (DS4_PROMPT_LIGHT_FILES: the pool's, then the files')
+        size_t n_pool = 0;
         // (a chunk whose head batches went out before its routing - DS4_SPEC_HEAD / DS4_SPEC_STAGED - on one device:
         //  the experts of those batches are copied already, so only the ones after them can be light; a group's
         //  members copied ahead by their own pace, so there the head chunks keep every expert as before)
@@ -19082,17 +19232,34 @@ struct Model::Impl {
                 lv.push_back(v);
                 rows += n;
             }
+            n_pool = lv.size();
+            S.light_n += n_pool;
+            S.light_rows += (size_t) rows;
+            // (DS4_PROMPT_LIGHT_FILES=R2) the files' experts at most R2 rows picked, up to the slots and their rows' cap
+            const int R2 = light_files();
+            if (R2 > 0) {
+                const int fcap = lf_cap(), slots = lf_slots();
+                int frows = 0;
+                for (size_t j = j_from; j < L0.host_list.size() && (int) (lv.size() - n_pool) < slots; ++j) {
+                    const int e = L0.host_list[j], v = L0.pv_n + (int) j, n = b[(size_t) v + 1] - b[(size_t) v];
+                    if (n <= 0 || n > R2 || !lf_ok(L0, e)) continue;
+                    if (frows + n > fcap) break;
+                    lv.push_back(v);
+                    frows += n;
+                    S.lf_bytes += (double) L0.region_bytes[(size_t) e];
+                }
+                S.lf_n += lv.size() - n_pool;
+                S.lf_rows += (size_t) frows;
+            }
             if (!lv.empty()) {
                 lmask.assign((size_t) n_vs, 0);
                 for (const int v : lv) lmask[(size_t) v] = 1;
-                S.light_n += lv.size();
-                S.light_rows += (size_t) rows;
             }
         }
         const bool lt_sent = !lv.empty() && mi == 0;
         if (lt_sent) {
             const double ls0 = now_ms();
-            if (!light_send(d, c, L0, lv, b, T, err)) return false;
+            if (!light_send(d, c, L0, lv, n_pool, b, T, err)) return false;
             S.light_send_ms += now_ms() - ls0;
         }
         if (S.skips(wp.k)) {
@@ -19134,6 +19301,7 @@ struct Model::Impl {
             const double lw0 = now_ms();
             const bool lt_ok = cudaEventSynchronize(c.lt_h) == cudaSuccess;
             S.light_wait += now_ms() - lw0;
+            if (!lf_join(c, S, err)) return false;   // (DS4_PROMPT_LIGHT_FILES: the files' job, its kernels behind lt_h)
             if (!lt_ok || helper_dead.load()) {
                 err = "the helper's light experts of layer " + std::to_string(L0.il) + " failed (DS4_PROMPT_LIGHT)";
                 return false;
@@ -19961,6 +20129,12 @@ struct Model::Impl {
                                  "copied (DS4_PROMPT_LIGHT=%d); the host waited %.2f s at layers' ends for their sums, %.2f s sending them\n",
                          devs[(size_t) di].id, S.light_n, S.light_rows, prompt_light(), S.light_wait / 1000.0,
                          S.light_send_ms / 1000.0);
+        if (!c.flow && S.lf_n > 0)
+            std::fprintf(stderr, "ds4 prompt batches, CUDA%d: %zu light experts from the files (%zu rows, %.2f GB read "
+                                 "beside the layers in %.2f s) computed on the helper, not copied (DS4_PROMPT_LIGHT_FILES=%d); "
+                                 "the host waited %.2f s for them at layers' ends\n",
+                         devs[(size_t) di].id, S.lf_n, S.lf_rows, S.lf_bytes / 1e9, S.lf_read_ms / 1000.0, light_files(),
+                         S.lf_wait / 1000.0);
         if (!c.flow && S.copied > 0 && std::getenv("DS4_FLOW_STATS") != nullptr)
             std::fprintf(stderr, "ds4 prompt batches, CUDA%d: copied experts by rows each: 1:%zu 2:%zu 3-4:%zu 5-8:%zu "
                                  "9-16:%zu 17-32:%zu 33-64:%zu 65+:%zu\n",
