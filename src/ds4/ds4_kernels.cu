@@ -4650,13 +4650,14 @@ static bool attn_wmma_now() {
 }
 // sparse_attn_wmma_kernel's form: 0 the plain one (16 heads a block), 1 its padded rows, 4 the padded rows with 4 groups
 // of 16 heads a block (one staged tile for all 64).  gfx11: 4 from kAttnShareT queries (64 heads), else 1 (Radeon 8065S,
-// Maya-XS at 32K: the kernel's time -41 % with 4, -35 % with 1; the same bits); gfx12: 0 (not measured).
+// Maya-XS at 32K: the kernel's time -41 % with 4, -35 % with 1; the same bits); gfx12: 1 (an R9700, DeepSeek-V4.1's
+// prompts: the attention -9 to -11 % from 2K to 20K tokens against 0; 4 slower than 0); others 0.
 // DS4_ATTN_SHARE=0|1|4 forces one (the device's arch cached a device)
 constexpr int kAttnShareT = 64;   // (fewer queries: a quarter of the blocks would leave the GPU idle)
 static int attn_wmma_mode(int heads, int T) {
 #if defined(STRATA_USE_HIP)
     static const int forced = std::getenv("DS4_ATTN_SHARE") != nullptr ? std::atoi(std::getenv("DS4_ATTN_SHARE")) : -1;
-    static std::atomic<int> known[64];   // 0: not asked yet, 1: not gfx11, 2: gfx11
+    static std::atomic<int> known[64];   // 0: not asked yet, 1: neither, 2: gfx11, 3: gfx12
     int mode = 0, dev = 0;
     if (forced >= 0) {
         mode = forced >= 2 ? 4 : forced;
@@ -4665,10 +4666,14 @@ static int attn_wmma_mode(int heads, int T) {
         int v = known[dev].load(std::memory_order_relaxed);
         if (v == 0) {
             cudaDeviceProp p{};
-            v = cudaGetDeviceProperties(&p, dev) == cudaSuccess && std::strncmp(p.gcnArchName, "gfx11", 5) == 0 ? 2 : 1;
+            v = 1;
+            if (cudaGetDeviceProperties(&p, dev) == cudaSuccess) {
+                if (std::strncmp(p.gcnArchName, "gfx11", 5) == 0) v = 2;
+                else if (std::strncmp(p.gcnArchName, "gfx12", 5) == 0) v = 3;
+            }
             known[dev].store(v, std::memory_order_relaxed);
         }
-        mode = v == 2 ? (T >= kAttnShareT ? 4 : 1) : 0;
+        mode = v == 2 ? (T >= kAttnShareT ? 4 : 1) : v == 3 ? 1 : 0;
     }
     return mode == 4 && heads % 64 != 0 ? 1 : mode;
 #else

@@ -1583,8 +1583,9 @@ these kernel switches do not use the `MAYA_*` alias convention.
 | --- | --- | --- |
 | `EXL3_WMMA_GFX12` | off | `1`: allow RDNA4 matrix instructions; unset or `0`: portable grouped EXL3 prefill on gfx12 |
 | `EXL3_WMMA_GFX950` | off | `1`: the EXL3 prompt path on CDNA 4 (gfx950, MI350X) matrix cores (MFMA); unset or `0`: the portable path on gfx950, as before. Its sums are grouped differently, so the answers can differ slightly |
-| `EXL3_WMMA_ROWS` | `16` | `16` or `32`: routed rows processed per block |
+| `EXL3_WMMA_ROWS` | `16` (`32` on RDNA 4, gfx12) | `16` or `32`: routed rows processed per block, on every device. 32 on an R9700: -12 % expert time on a 20K DeepSeek prompt, none lost on 2K / 8K |
 | `EXL3_WMMA_SHAPE` | on (RDNA 3 / 3.5, gfx11) | gfx11 only: K2 4 and 5 expert sets (DeepSeek's 2.25 bpw EXL3) pick their block size by rows a set - 16, then 32 rows a block from 64 rows a set, 64 rows a block from 128 - with the tile words moved between lanes and less LDS. The same bits as the uniform blocks. `0` (or setting `EXL3_WMMA_ROWS`) = the uniform blocks, as before |
+| `DS4_ATTN_SHARE` | gfx11: `4` from 64 queries, else `1`; gfx12: `1`; others `0` | `0`, `1` or `4`: the sparse-attention prompt kernel's form - `0` the plain one, `1` its padded rows, `4` padded rows with four 16-head groups a block. The same bits. `1` on an R9700: the attention -9 to -11 % from 2K to 20K tokens against `0`; `4` slower |
 | `EXL3_WMMA` | enabled where supported | `0`: disable matrix prefill, overriding the gfx12 setting; `1`: allow it |
 
 Restart after changing these settings. Decode/verification kernels retain

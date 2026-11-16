@@ -2056,7 +2056,7 @@ __global__ void __launch_bounds__(kThreads) set_mix_kernel(const KSetMix a, KMix
 // A's layout (lane m and m + 16: output m's 16 inputs); each 16 activations of the slice are a B (lane n and n + 16:
 // activation n's 16 inputs); D's element i is output 2i + lane / 16 of the tile for activation lane % 16.  The host
 // uses this layout on gfx11 and, through the MFMA branch below, on gfx950; the gfx12 implementation follows below.
-// All use EXL3_WMMA_ROWS 16 or 32 (by default 16). The decode and verify kernels keep
+// All use EXL3_WMMA_ROWS 16 or 32 (by default 16, on gfx12 32). The decode and verify kernels keep
 // block_gemv (their bits are the token path's).
 // Volta / Turing (sm_70 .. sm_75: no mma.m16n8k16, so not the tensor-core kernels below) run the same kernel on
 // nvcuda::wmma's 16x16x16 FP16 product with F32 sums: A the warp's decoded tile from wt (row-major, output by input),
@@ -3387,12 +3387,27 @@ static bool wmma_now() {
     return known[dev] == 2;
 #endif
 }
-// the matrix-core prompt kernels' rows a block: 16 (EXL3_WMMA_ROWS=32: each weight tile decoded once for 32 rows -
-// slower on a Radeon 8065S, 167 against 208 tokens/s on a 4K prompt: twice the shared memory, half the blocks a CU)
+// the matrix-core prompt kernels' rows a block: 16, on gfx12 32 (each weight tile decoded once for 32 rows - an R9700,
+// DeepSeek-V4.1's experts: -12 % expert time on a 20K prompt, none lost on 2K / 8K).  EXL3_WMMA_ROWS=16|32 forces one
+// for every device (32 slower on a Radeon 8065S, 167 against 208 tokens/s on a 4K prompt: twice the shared memory, half
+// the blocks a CU)
 static int wmma_rows() {
     static const char* v = std::getenv("EXL3_WMMA_ROWS");
-    static const int r = v != nullptr && std::atoi(v) == 32 ? 32 : 16;
+    if (v != nullptr) return std::atoi(v) == 32 ? 32 : 16;
+#if defined(STRATA_USE_HIP)
+    static std::atomic<int> known[64];   // 0: not asked yet, else the device's rows
+    int dev = -1;
+    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= 64) return 16;
+    int r = known[dev].load(std::memory_order_relaxed);
+    if (r == 0) {
+        cudaDeviceProp p{};
+        r = cudaGetDeviceProperties(&p, dev) == cudaSuccess && std::strncmp(p.gcnArchName, "gfx12", 5) == 0 ? 32 : 16;
+        known[dev].store(r, std::memory_order_relaxed);
+    }
     return r;
+#else
+    return 16;
+#endif
 }
 template <class F>
 static void with_rows(F&& f) {   // (f(std::integral_constant<int, wmma_rows()>{}))
