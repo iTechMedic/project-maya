@@ -9958,6 +9958,52 @@ struct Model::Impl {
         if (o.verbose)
             std::fprintf(stderr, "ds4: loading %zu experts (regions up to %.1f MB, blobs up to %.1f MB)\n", jobs.size(),
                          maxr / 1e6, maxb / 1e6);
+        // Each GPU's share of the load, for Maya's loading box (MAYA_DS4_LOAD_PROGRESS=0: off).  The box reads GLM's
+        // start lines (tools/setup_bridge.py WARMING / WARMED: "glm fast: CUDA2 warming the expert tiers 40% (5.4 of
+        // 13.4 GB, 11 s)", then "glm fast: CUDA2 tiers warm: 1152 experts (13.4 GB) in 29 s"), one row a GPU by its
+        // CUDA number, so the same lines here: the bytes read for its VRAM slots (a group's expert split over its
+        // members) or for the helper's pool.  Lines only - what is loaded and where is unchanged.
+        const bool load_progress = [] {
+            const char* v = std::getenv("MAYA_DS4_LOAD_PROGRESS");
+            return v == nullptr || *v == 0 || std::atoi(v) != 0;
+        }();
+        int max_dev = helper_id;
+        for (const Dev& d : devs) max_dev = std::max(max_dev, d.id);
+        const size_t nd = (size_t) std::max(0, max_dev) + 1;
+        std::vector<int64_t> dev_total(nd, 0);
+        std::vector<int> dev_experts(nd, 0);
+        std::unique_ptr<std::atomic<int64_t>[]> dev_done(new std::atomic<int64_t>[nd]);
+        for (size_t k = 0; k < nd; ++k) dev_done[k].store(0);
+        // job -> (device, bytes) pieces: the helper's pool and/or each VRAM member's part
+        const auto pieces = [&](const Layer& l, int e, auto&& add) {
+            const int64_t b = (int64_t) l.region_bytes[(size_t) e];
+            if (helper_id >= 0 && helper_owned(l, e)) add(helper_id, b);
+            if (l.slot[(size_t) e] >= 0)
+                for (int m = 0; m < l.nm; ++m) {
+                    const int64_t share = b / l.nm + (m == l.nm - 1 ? b % l.nm : 0);
+                    add(devs[(size_t) member(l, m).dev].id, share);
+                }
+        };
+        if (load_progress)
+            for (const Job& j : jobs)
+                pieces(L[(size_t) j.layer], j.e, [&](int dev, int64_t b) {
+                    if (dev >= 0 && (size_t) dev < nd) dev_total[(size_t) dev] += b, ++dev_experts[(size_t) dev];
+                });
+        std::atomic<int64_t> progress_ms{0};
+        std::mutex progress_mu;
+        const auto report = [&](bool force) {   // every GPU still loading, about once a second
+            const int64_t now = (int64_t) (now_ms() - t0);
+            int64_t last = progress_ms.load();
+            if (!force && (now - last < 1000 || !progress_ms.compare_exchange_strong(last, now))) return;
+            std::lock_guard<std::mutex> lk(progress_mu);
+            for (size_t k = 0; k < nd; ++k) {
+                const int64_t tot = dev_total[k], dn = dev_done[k].load();
+                if (tot <= 0 || dn >= tot) continue;
+                std::fprintf(stderr, "glm fast: CUDA%zu warming the expert tiers %d%% (%.1f of %.1f GB, %.0f s)\n", k,
+                             (int) (100.0 * (double) dn / (double) tot), dn / 1e9, tot / 1e9, now / 1000.0);
+            }
+        };
+        if (load_progress) report(true);   // (every GPU's part at 0%: the box knows the whole from the start)
         std::vector<std::thread> th;
         for (int t = 0; t < nth; ++t)
             th.emplace_back([&] {
@@ -10048,6 +10094,19 @@ struct Model::Impl {
                     }
                     const int64_t db = done_bytes.fetch_add((int64_t) l.region_bytes[(size_t) e]) +
                                        (int64_t) l.region_bytes[(size_t) e];
+                    if (load_progress) {
+                        pieces(l, e, [&](int dev, int64_t b) {
+                            if (dev < 0 || (size_t) dev >= nd) return;
+                            const int64_t was = dev_done[(size_t) dev].fetch_add(b);
+                            if (was < dev_total[(size_t) dev] && was + b >= dev_total[(size_t) dev]) {   // (its last)
+                                std::lock_guard<std::mutex> lk(progress_mu);
+                                std::fprintf(stderr, "glm fast: CUDA%d tiers warm: %d experts (%.1f GB) in %.0f s\n", dev,
+                                             dev_experts[(size_t) dev], dev_total[(size_t) dev] / 1e9,
+                                             (now_ms() - t0) / 1000.0);
+                            }
+                        });
+                        report(false);
+                    }
                     if (o.verbose && (i % 1024) == 0)
                         std::fprintf(stderr, "ds4: experts %zu / %zu (%.1f GB, %.2f GB/s)\n", i, jobs.size(),
                                      db / 1e9, db / 1e6 / std::max(1.0, now_ms() - t0));
