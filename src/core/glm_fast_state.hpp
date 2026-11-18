@@ -669,6 +669,22 @@ struct Glm5Model::FastState {
         all_in_vram = all;
         all_resident = on && all;
     }
+    // Every expert a verify window's routes can pick in layers [l0, l1) is, as of the last boundary, in this device's
+    // VRAM or the linked helper's own: a route then only looks its experts up - no spare or scratch slot, no fetch, no
+    // CPU-lane split, no miss - so nothing a token's route does depends on what another token's route did before it,
+    // and the window's two orders (staggered groups / one pass) give the same answers and leave the same tables.
+    // With one expert elsewhere (the RAM tier, disk, on its way between tiers) that no longer holds: the groups have 4
+    // scratch slots each where one pass has 8 for the layer, so one order can run a window again token by token
+    // (window(): the scratch clash) where the other does not, and the routes it repeats move the counts and the tiers.
+    bool window_orders_agree(int l0, int l1, int n_expert) const {
+        for (int il = l0; il < l1; ++il) {
+            if (!L[(size_t) il].moe) continue;
+            const int* so = slot_of.data() + (size_t) il * n_expert;
+            for (int e = 0; e < n_expert; ++e)
+                if (so[e] < 0 && !helper.owns(il * n_expert + e)) return false;
+        }
+        return true;
+    }
     std::vector<uint32_t> cnt;   // il * n_expert + e -> LFU count (aged), over both tiers
     // ... and the long memory: routes per key across sessions (expert_usage.txt), halved when one passes 2^30 -
     // the warm-up fills the tiers in its order (this user's experts first)
@@ -873,6 +889,15 @@ struct Glm5Model::FastState {
         float* wh = nullptr;                // EXL3: [tmax * 8][n_ff] each entry's h (F32)
         unsigned long long* grp_ptr = nullptr;
         int *grp_start = nullptr, *grp_ent = nullptr, *n_groups = nullptr;
+        float* hc_part = nullptr;           // [tmax][hc_part_n]: each token's own hc partials (win_hc_rows: the
+        size_t hc_part_n = 0;               // window's tokens' hyper-connections in one launch, gf::hc_rows)
+        uint8_t* hc_ctr = nullptr;          // [tmax] barrier counters 64 bytes apart, zeroed once
+        bool stagger_now = true;            // this window: two staggered groups (window() sets it: win_stagger_mode)
+        struct StagTrial {                  // MAYA_GLM_WIN_STAGGER=auto, per window size: [0] one pass, [1] staggered
+            int n[2] = {0, 0};
+            double sum[2] = {0.0, 0.0}, mx[2] = {0.0, 0.0};
+            int pick = -1;                  // -1: still measuring
+        } stag[17];                         // (Glm5Model::kWinMax + 1)
         unsigned int* scr = nullptr;        // [0] the layer's scratch claims, [1] sticky: a slot taken twice
         unsigned int* scr_h = nullptr;      // pinned: [1] read after the window
         unsigned int* cpu_seq_w = nullptr;  // [tmax] seq words 64 bytes apart
