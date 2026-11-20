@@ -3327,7 +3327,9 @@ bool win_experts(const WinArgs& a, cudaStream_t s) {
                !dispatch<RunWinDown>(a.lay.k2[2], a.lay.cb, w, groups, s)) {
         return false;
     }
+    if (a.prof != nullptr) a.prof(a.prof_ctx, 0);
     if (a.wait_ptr != nullptr) win_wait_kernel<<<1, 32, 0, s>>>(a.wait_ptr, a.wait_val);
+    if (a.prof != nullptr) a.prof(a.prof_ctx, 1);
     win_combine_kernel<<<dim3((unsigned) (a.n_embd / kCols), (unsigned) a.T), kCols, 0, s>>>(w);
     launch_check("win_experts");
     return true;

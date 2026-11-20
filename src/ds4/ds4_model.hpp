@@ -119,7 +119,14 @@ struct Stats {
     int64_t helper_experts = 0;             // ... and how many of the others the helper GPU computed (DS4_HELPER)
     int64_t helper_fallback = 0;            // its picks the CPU lane computed instead (after a helper failure)
     int helper_held = 0, helper_dead = 0;   // experts in its pool; 1: it failed (or answered late), the CPU lane took over
-    double helper_ms = 0.0;                 // the service thread's waits for the helper's answers, after its own part
+    // (DS4_PROF, the service thread: a helper request seen to its flag, the flag to the answer published, seen to the
+    //  helper's take (DS4_PROF_TAKE); how many)
+    double svc_seen_flag_ms = 0.0, svc_flag_ans_ms = 0.0, svc_seen_took_ms = 0.0;
+    int64_t svc_helper_n = 0;
+    // (DS4_PROF, the helper's jobs: in before their request by, how many; not in yet; its thread's enqueue time, count)
+    double svc_job_lead_ms = 0.0, hq_enq_ms = 0.0;
+    int64_t svc_job_lead_n = 0, svc_job_late_n = 0, hq_enq_n = 0;
+    double helper_ms = 0.0;                // the service thread's waits for the helper's answers, after its own part
     int64_t hr_hits = 0;                    // DS4_HELPER_RECENT: picks its recent slots served; fills mapped, slots'
     int64_t hr_maps = 0, hr_evicts = 0;     //   experts let go, fills that failed, fills left unmapped (VRAM took the
     int64_t hr_fails = 0, hr_abandoned = 0; //   expert meanwhile)
@@ -128,6 +135,7 @@ struct Stats {
     int64_t eg_rows = 0, eg_hits = 0, eg_reads = 0;   // consumer Engram lookups: cache hits, on-demand reads
     int64_t eg_pf_rows = 0, eg_pf_hits = 0, eg_pf_reads = 0;   // the same accounting for the prompt prefetcher
     double eg_io_ms = 0.0;                            // the windows' Engram reads, issue to last done (mostly hidden)
+    int64_t eg_batches = 0, eg_batch_05 = 0, eg_batch_2 = 0, eg_batch_10 = 0;   // their batches with a read; > 0.5 / 2 / 10 ms
     double eg_pf_io_ms = 0.0, eg_pf_wait_ms = 0.0;    // prefetch read span and worker wait, cumulative
     int64_t eg_cached = 0, eg_cache_cap = 0;          // the row cache's rows held, its capacity
     int64_t eg_cache_row_bytes = 0;                   // each cached row's payload bytes
@@ -145,8 +153,10 @@ struct Stats {
     int64_t store_guesses = 0, store_guess_used = 0, store_cancelled = 0;
     int64_t store_put = 0, store_evicted = 0, store_failed = 0;
     double store_wait_ms = 0.0;
-    double prof_ms[6] = {};          // DS4_PROF: the GPU's time in decode by stage (between layers, attention, routing +
-    int64_t prof_tokens = 0;         // shared expert, experts' gate / up, the wait for the CPU lane, down + post)
+    double prof_ms[19] = {};          // DS4_PROF: the GPU's time in decode by stage (between layers, attention, routing +
+    int64_t prof_tokens = 0;         // shared expert, experts' gate / up, the wait for the CPU lane, down + post; then
+                                     // the attention's parts: 6 Engram, 7 split + projections + q, 8 its core - 1 is
+                                     // the rest of it, its output's projections and hc_post)
     // lookahead (decode windows of one): the picks of layers guessed a layer before (the next layer's gate on this
     // layer's FFN input), of them in the guess's top k / in all its guesses / in the guess two layers before; the picks
     // read from the files, of them prefetched early; experts prefetched early

@@ -3232,7 +3232,23 @@ __global__ void __launch_bounds__(256) helper_take_kernel(const Req* req, unsign
         plan[j] = p;
         w[j] = p != 0ull ? r->w[t][i] : 0.0f;
     }
-    for (int j = threadIdx.x; j < T * dim; j += blockDim.x) x[j] = r->x[j / dim][j % dim];
+    // (the tokens' x from host-mapped memory: each read waits out the host memory's latency, so a thread keeps 8 of
+    //  them in flight before it writes them - the same values in the same places)
+    constexpr int kU = 8;
+    const int nx = T * dim;
+    for (int j0 = threadIdx.x; j0 < nx; j0 += blockDim.x * kU) {
+        float v[kU];
+#pragma unroll
+        for (int u = 0; u < kU; ++u) {
+            const int j = j0 + u * (int) blockDim.x;
+            v[u] = j < nx ? r->x[j / dim][j % dim] : 0.0f;
+        }
+#pragma unroll
+        for (int u = 0; u < kU; ++u) {
+            const int j = j0 + u * (int) blockDim.x;
+            if (j < nx) x[j] = v[u];
+        }
+    }
     __syncthreads();
     if (threadIdx.x == 0 && live) {
         __threadfence_system();

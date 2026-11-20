@@ -1587,6 +1587,7 @@ struct Model::Impl {
     std::vector<uint8_t> eg_q6k;   // Engram layer li's row format: 1 ggml Q6_K (superblocks of 256), 2 IQ4_NL (blocks of
                                    // 32), 0 FP8
     std::atomic<int64_t> eg_rows_n{0}, eg_hits_n{0}, eg_reads_n{0}, eg_wait_ns{0}, eg_io_ns{0};
+    std::atomic<int64_t> eg_batch_n{0}, eg_b05_n{0}, eg_b2_n{0}, eg_b10_n{0};   // (consumer batches; issue to done > 0.5, 2, 10 ms)
     std::atomic<int64_t> eg_pf_rows_n{0}, eg_pf_hits_n{0}, eg_pf_reads_n{0}, eg_pf_wait_ns{0}, eg_pf_io_ns{0};
     uint16_t* h_emb = nullptr;        // the window's embedding rows
     std::vector<float> c_xh, c_xsb, c_acc, c_xhd, c_xsd, c_accd, c_yd;
@@ -2349,12 +2350,70 @@ struct Model::Impl {
         }
         prof_marks.push_back({d.id, e, stage});
     }
+    // (DS4_PROF, decode windows: the attention's parts - 6 Engram, 7 the HC split, norms, projections and q, 8 the
+    //  attention core; the output's projections and hc_post stay 1)
+    void prof_sub(const Dev& d, int stage) {
+        if (prof_chunk) return;
+        prof_mark(d, stage);
+    }
+    // (DS4_PROF, the helper GPU's stream: before its take, after it, after its experts - events on the helper device)
+    struct HelperProf { cudaEvent_t e[4] = {nullptr, nullptr, nullptr, nullptr}; };
+    std::vector<HelperProf> hprof_jobs;
+    double svc_t_seen = 0.0, svc_t_flag = 0.0;   // (the service thread's: a request seen, its helper flag seen)
+    // (DS4_PROF: when each slot's helper job was in, its seq)
+    std::atomic<double> hq_in_at[kRing];
+    std::atomic<unsigned> hq_in_seq[kRing];
+    std::vector<cudaEvent_t> hprof_free;
+    cudaEvent_t hprof_event() {   // (the helper device current)
+        {
+            std::lock_guard<std::mutex> lk(prof_mu);
+            if (!hprof_free.empty()) {
+                cudaEvent_t e = hprof_free.back();
+                hprof_free.pop_back();
+                return e;
+            }
+        }
+        cudaEvent_t e = nullptr;
+        return cudaEventCreate(&e) == cudaSuccess ? e : nullptr;
+    }
+    void hprof_put(cudaEvent_t e) {
+        std::lock_guard<std::mutex> lk(prof_mu);
+        hprof_free.push_back(e);
+    }
+    // (prof_mu held) the helper's finished jobs into st.prof_ms[14] (its wait for the request), [15] (its experts),
+    // [16] (how many)
+    void hprof_drain() {
+        if (hprof_jobs.empty() || helper_id < 0) return;
+        int cur = 0;
+        cudaGetDevice(&cur);
+        if (cudaSetDevice(helper_id) != cudaSuccess) return;
+        std::vector<HelperProf> keep;
+        for (const HelperProf& j : hprof_jobs) {
+            if (cudaEventQuery(j.e[3]) != cudaSuccess) {
+                keep.push_back(j);
+                continue;
+            }
+            float a = 0.0f, b = 0.0f, c = 0.0f;
+            if (cudaEventElapsedTime(&a, j.e[0], j.e[1]) == cudaSuccess &&
+                cudaEventElapsedTime(&b, j.e[1], j.e[2]) == cudaSuccess &&
+                cudaEventElapsedTime(&c, j.e[2], j.e[3]) == cudaSuccess) {
+                st.prof_ms[14] += a;
+                st.prof_ms[15] += b;
+                st.prof_ms[16] += 1.0;
+                st.prof_ms[18] += c;   // (its flag's kernel: the system fence and the store)
+            }
+            for (cudaEvent_t e : j.e) hprof_free.push_back(e);
+        }
+        hprof_jobs.swap(keep);
+        cudaSetDevice(cur);
+    }
     void prof_collect() {
         if (!prof_window && !prof_chunk) return;
         std::lock_guard<std::mutex> lk(prof_mu);
+        if (!prof_chunk) hprof_drain();
         const bool chunk_sample = prof_chunk;
         bool sample_ok = !prof_failed;
-        double sample_ms[8] = {};
+        double sample_ms[18] = {};
         std::vector<std::pair<int, cudaEvent_t>> last;
         int current_dev = -1;
         if (sample_ok) {
@@ -2393,7 +2452,7 @@ struct Model::Impl {
         }
         if (sample_ok) {
             double* total = chunk_sample ? cprof_ms : st.prof_ms;
-            const int stages = chunk_sample ? 8 : 6;
+            const int stages = chunk_sample ? 8 : 18;   // (a window's 6, 7, 8: its attention's parts - prof_sub)
             for (int i = 0; i < stages; ++i) total[i] += sample_ms[i];
             for (const ProfMark& m : prof_marks) prof_pool[(size_t) m.dev].push_back(m.ev);
             prof_marks.clear();
@@ -11598,8 +11657,16 @@ struct Model::Impl {
                 eg_pf_hits_n += b.lookups - b.io_reads;
                 eg_pf_reads_n += b.io_reads;
             }
-            if (account) eg_io_ns += b.t1.load() - b.t0;
-            else eg_pf_io_ns += b.t1.load() - b.t0;
+            if (account) {
+                const int64_t dt = b.t1.load() - b.t0;
+                eg_io_ns += dt;
+                if (!b.reads.empty()) {
+                    ++eg_batch_n;
+                    if (dt > 500000) ++eg_b05_n;
+                    if (dt > 2000000) ++eg_b2_n;
+                    if (dt > 10000000) ++eg_b10_n;
+                }
+            } else eg_pf_io_ns += b.t1.load() - b.t0;
             b.live = false;
             b.post.store(2, std::memory_order_release);
         } else {
@@ -11612,6 +11679,10 @@ struct Model::Impl {
         st.eg_rows = eg_rows_n.load();
         st.eg_hits = eg_hits_n.load();
         st.eg_reads = eg_reads_n.load();
+        st.eg_batches = eg_batch_n.load();
+        st.eg_batch_05 = eg_b05_n.load();
+        st.eg_batch_2 = eg_b2_n.load();
+        st.eg_batch_10 = eg_b10_n.load();
         st.eg_pf_rows = eg_pf_rows_n.load();
         st.eg_pf_hits = eg_pf_hits_n.load();
         st.eg_pf_reads = eg_pf_reads_n.load();
@@ -15651,7 +15722,17 @@ struct Model::Impl {
             }
             if (helper_dead.load(std::memory_order_relaxed)) continue;
             if (j.tables) helper_tables();
-            else helper_enqueue(L[(size_t) j.il], (int) (j.seq % kRing), j.seq, j.T);
+            else {
+                const double t0 = now_ms();
+                helper_enqueue(L[(size_t) j.il], (int) (j.seq % kRing), j.seq, j.T);
+                const double t1 = now_ms();
+                if (prof_window) {   // (DS4_PROF: its host time, and when it was in for the service thread to compare)
+                    st.hq_enq_ms += t1 - t0;
+                    ++st.hq_enq_n;
+                    hq_in_at[j.seq % kRing].store(t1, std::memory_order_release);
+                    hq_in_seq[j.seq % kRing].store(j.seq, std::memory_order_release);
+                }
+            }
         }
     }
 
@@ -15669,8 +15750,15 @@ struct Model::Impl {
         bool ok = cudaSetDevice(helper_id) == cudaSuccess;
         if (ok) {
             const size_t D = (size_t) g.dim;
+            // (DS4_PROF, decode windows: the helper's stream timed - its wait for the request, then its experts)
+            HelperProf hpf;
+            if (prof_window && !prof_chunk && !tokens) {
+                hpf.e[0] = hprof_event();
+                if (hpf.e[0] != nullptr) cudaEventRecord(hpf.e[0], helper_st);
+            }
             helper_take(reqs + slot, sq, l.k_exp, g.dim, l.helper_tab, l.n_exp, helper_plan, helper_w, helper_x,
                         helper_flags + slot, helper_flags + 2 * kRing, helper_st);
+            if (hpf.e[0] != nullptr && (hpf.e[1] = hprof_event()) != nullptr) cudaEventRecord(hpf.e[1], helper_st);
             if (rh_serve) rh_mark(0);
             if (T > 1 && !tokens) {
                 gf::MoeWin mw;
@@ -15725,10 +15813,19 @@ struct Model::Impl {
             // (its answer's flag only after every launch went in: a failed one leaves the flag down, so the service
             //  thread's wait ends on helper_dead and the CPU lane computes the picks - never a stale sum)
             ok = ok && cudaGetLastError() == cudaSuccess && gg::launch_errors() == e0 && x3::launch_errors() == ex0;
+            if (hpf.e[1] != nullptr && (hpf.e[2] = hprof_event()) != nullptr) cudaEventRecord(hpf.e[2], helper_st);
             if (rh_serve) rh_mark(1);
             if (ok && rh_dout != nullptr)   // (MAYA_MIXED_HELPER hot: the sums out by DMA, then the flag)
                 ok = cudaMemcpyAsync(rh_hres + (size_t) slot * kWin * D, rh_dout, (size_t) T * D * 4, cudaMemcpyDeviceToHost, helper_st) == cudaSuccess;
             if (ok) signal_seq(helper_flags + kRing + slot, sq, helper_st);
+            if (hpf.e[2] != nullptr && (hpf.e[3] = hprof_event()) != nullptr) {   // (DS4_PROF: after its flag)
+                cudaEventRecord(hpf.e[3], helper_st);
+                std::lock_guard<std::mutex> lk(prof_mu);
+                hprof_jobs.push_back(hpf);
+            } else {
+                for (cudaEvent_t e : hpf.e)
+                    if (e != nullptr) hprof_put(e);
+            }
             ok = ok && cudaGetLastError() == cudaSuccess;
         }
         cudaSetDevice(cur);
@@ -15756,7 +15853,8 @@ struct Model::Impl {
             cpu_relax();
         }
         std::atomic_thread_fence(std::memory_order_acquire);
-        st.helper_ms += now_ms() - t0;
+        svc_t_flag = now_ms();
+        st.helper_ms += svc_t_flag - t0;
         if (!ok && !helper_dead.exchange(true))
             std::fprintf(stderr, "ds4: helper CUDA%d: no answer to request %u in %.0f ms - the CPU lane takes its picks "
                                  "from now on\n", helper_id, seq, now_ms() - t0);
@@ -16243,6 +16341,15 @@ struct Model::Impl {
             }
             deep = false;
             std::atomic_thread_fence(std::memory_order_acquire);
+            svc_t_seen = now_ms();
+            svc_t_flag = 0.0;
+            if (prof_window && hq_in_seq[next % kRing].load(std::memory_order_acquire) == next) {
+                // (DS4_PROF: the helper's job for this request in before it was seen - positive - or after)
+                st.svc_job_lead_ms += svc_t_seen - hq_in_at[next % kRing].load(std::memory_order_acquire);
+                ++st.svc_job_lead_n;
+            } else if (prof_window && helper_n > 0) {
+                ++st.svc_job_late_n;   // (not in yet when seen)
+            }
             const int li = layer_of[next % kRing].load(std::memory_order_acquire);
             Resp& rp = resps[next % kRing];
             const int T = std::max(1, std::min(kWin, r.T));
@@ -16263,6 +16370,12 @@ struct Model::Impl {
                 // CPU lane's cache hits, RAM tier, disk skip or stream
                 const bool hon = l.helper_tab != nullptr && !helper_dead.load(std::memory_order_relaxed);
                 hpicks.clear();
+                if (hon && prof_window && std::getenv("DS4_PROF_TAKE") != nullptr) {   // (DS4_PROF: the take's ack)
+                    const volatile unsigned* ack = helper_flags + (next % kRing);
+                    const double t0 = now_ms();
+                    while (*ack != next && now_ms() - t0 < 50.0) cpu_relax();
+                    st.svc_seen_took_ms += now_ms() - svc_t_seen;
+                }
                 const bool dsk_rule = disk_skip_w > 0.0f && !l.mtp && li >= disk_skip_from && li < g.nl;
                 // (DISK_SKIP_AUTO: skipping now; its counts only then - the routed experts computed either way, of them
                 //  on the CPU lane and not in RAM, of them on the CPU lane)
@@ -16443,6 +16556,12 @@ struct Model::Impl {
             std::atomic_thread_fence(std::memory_order_release);
             *(volatile unsigned*) &rp.seq = next;
             *(volatile unsigned*) lane_done = next;
+            if (svc_t_flag > 0.0) {   // (DS4_PROF's helper line: the service thread's own times of a helper request)
+                const double ta = now_ms();
+                st.svc_seen_flag_ms += svc_t_flag - svc_t_seen;
+                st.svc_flag_ans_ms += ta - svc_t_flag;
+                ++st.svc_helper_n;
+            }
             ++next;
             last = std::chrono::steady_clock::now();
         }
@@ -23087,6 +23206,7 @@ struct Model::Impl {
             if (!mv(d, {job(l.eg_wkv, d.eg_x, d.eg_kv, T, (size_t) cols * ehd, (size_t) (H + 1) * D)}, err)) return false;
             engram_gate(d.h, d.eg_kv, l.eg_w, H, D, T, g.eps, s);
         }
+        prof_sub(d, 6);
         // attention
         // (hc_side: hc_mix + hc_split on st2 beside the attention - the pre norm takes the lagged pre, a_post / a_comb /
         // a_pre are read from the attention's hc_post on, where st waits for them)
@@ -23156,6 +23276,7 @@ struct Model::Impl {
                     finish(d.q + (size_t) t * HQ, NHL, HD, HD, fr, s);
                 }
         }
+        prof_sub(d, 7);
         if (wp.nrow == 0) {
             if (!attn_core(l, mi, d, p0, T, 0, wp, attn_bound(l), err)) return false;
         } else if (ma) {   // (DS4_MULTI_ATTN: the rows' attention in one launch a step)
@@ -23171,6 +23292,7 @@ struct Model::Impl {
             }
             if (!multi_put(l, mi, d, wp, err)) return false;
         }
+        prof_sub(d, 8);
         if (NHL > 0) {
             x3::MvJob j[16];
             const int per = HQ / OG;
@@ -23277,6 +23399,7 @@ struct Model::Impl {
                               lane_done, mi == 0 && sq == 0 && host_free(l) ? dev_count(d, l.il) : nullptr);
             }
             if (rh_lead && lead && !rh_req_out(slot, T, s, err)) return false;
+            prof_sub(d, 17);   // (DS4_PROF: the routing up to its request published; 2 is then the shared expert)
             {
                 x3::MvJob js[2] = {job(l.s1, d.x, d.sg, T, D, FF), job(l.s3, d.x, d.su, T, D, FF)};
                 if (!mv_n(d, js, 2, err, ffn_q8)) return false;
@@ -23403,15 +23526,29 @@ struct Model::Impl {
                 wa.n_embd = D;
                 wa.n_ff = FF;
                 wa.limit = g.lim;
+                // (DS4_PROF: 9 the grouping and the lane's fetch, 10 the experts' gate / up / down, 11 the wait for
+                //  the CPU lane's part, 12 the combine)
+                using ProfSelf = std::remove_pointer_t<decltype(this)>;
+                struct ProfCtx { ProfSelf* self; const Dev* d; } pc{this, &d};
+                if (prof_window && !prof_chunk) {
+                    wa.prof = +[](void* c, int k) {
+                        auto* p = static_cast<ProfCtx*>(c);
+                        p->self->prof_sub(*p->d, k == 0 ? 10 : 11);
+                    };
+                    wa.prof_ctx = &pc;
+                }
+                prof_sub(d, 9);
                 if (!(lay.fmt == gg::kFmtMXFP4 ? gg::win_experts(wa, s) : x3::win_experts(wa, s))) {
                     err = "exl3 win_experts failed";
                     return false;
                 }
+                prof_sub(d, 12);
             }
             if (mi == 0) st.experts += (int64_t) T * l.k_exp;
             if (mi == 0 && l.mtp) st.draft_experts += (int64_t) T * l.k_exp;
             if (nm > 1) allreduce(d.moe_out, T * D, ag, mi, ++d.ar_seq, d.xcnt, s);
             if (hs) CK(cudaStreamWaitEvent(s, d.hc_done, 0));
+            prof_sub(d, 13);   // (DS4_PROF: the tensor-parallel allreduce and the wait for hc_done)
             ablate(d, d.moe_out, T, wp, s);
             hc_post(d.moe_out, d.h, d.f_post, d.f_comb, D, H, T, d.h2, s);
             std::swap(d.h, d.h2);

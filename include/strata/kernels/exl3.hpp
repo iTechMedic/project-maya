@@ -165,6 +165,10 @@ struct WinArgs {
     // part arrives while the device computes the experts); cpu_flag may be null (no CPU part)
     const unsigned* wait_ptr = nullptr;
     unsigned wait_val = 0;
+    // (profiling, given: called on the host between the launches - 0 after the experts' gate / up / down, 1 after
+    //  the wait for the CPU lane's part)
+    void (*prof)(void*, int) = nullptr;
+    void* prof_ctx = nullptr;
 };
 bool win_experts(const WinArgs& a, cudaStream_t s);
 /// Whether the current device runs the several-activation kernels (win_experts; mv's ncol > 1): every device does

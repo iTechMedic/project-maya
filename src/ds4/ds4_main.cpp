@@ -245,14 +245,50 @@ struct Lines {
 void prof_line(const strata::ds4::Stats& s0, const strata::ds4::Stats& s) {
     if (s.prof_tokens <= s0.prof_tokens) return;
     const double pt = (double) (s.prof_tokens - s0.prof_tokens);
-    double sum = 0;
-    for (int i = 0; i < 6; ++i) sum += (s.prof_ms[i] - s0.prof_ms[i]) / pt;
+    double sum = 0, d[18];
+    for (int i = 0; i < 18; ++i) d[i] = (s.prof_ms[i] - s0.prof_ms[i]) / pt;
+    for (int i : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17}) sum += d[i];   // (14-16: the helper's own)
     std::fprintf(stderr, "GPU per token (DS4_PROF): %.2f ms - between layers %.2f, attention %.2f, routing + shared "
                          "expert %.2f, experts gate/up %.2f, waiting for the CPU lane %.2f, down + post %.2f; %lld tokens\n",
-                 sum, (s.prof_ms[0] - s0.prof_ms[0]) / pt, (s.prof_ms[1] - s0.prof_ms[1]) / pt,
-                 (s.prof_ms[2] - s0.prof_ms[2]) / pt, (s.prof_ms[3] - s0.prof_ms[3]) / pt,
-                 (s.prof_ms[4] - s0.prof_ms[4]) / pt, (s.prof_ms[5] - s0.prof_ms[5]) / pt,
+                 sum, d[0], d[1] + d[6] + d[7] + d[8], d[2] + d[17], d[3], d[4], d[5] + d[9] + d[10] + d[11] + d[12] + d[13],
                  (long long) (s.prof_tokens - s0.prof_tokens));
+    std::fprintf(stderr, "down + post per token (DS4_PROF): grouping + lane fetch %.2f, experts %.2f, CPU-lane wait %.2f, "
+                         "combine %.2f, allreduce %.2f, post %.2f ms; routing to its request out %.2f, shared expert %.2f, "
+                         "request out to answer in %.2f ms\n",
+                 d[9], d[10], d[11], d[12], d[13], d[5], d[17], d[2], d[2] + d[9] + d[10] + d[11]);
+    const double hj = s.prof_ms[16] - s0.prof_ms[16];
+    if (hj > 0)
+        std::fprintf(stderr, "helper per token (DS4_PROF): %.1f layer jobs, its stream waiting for the request %.2f ms, its "
+                             "experts %.2f ms; %.1f of %.1f picks on it, %.1f on the CPU lane; the service thread's wait "
+                             "for it %.2f ms; its flag's kernel %.3f ms\n",
+                     hj / pt, (s.prof_ms[14] - s0.prof_ms[14]) / pt, (s.prof_ms[15] - s0.prof_ms[15]) / pt,
+                     (double) (s.helper_experts - s0.helper_experts) / pt, (double) (s.experts - s0.experts) / pt,
+                     (double) (s.cpu_experts - s0.cpu_experts) / pt, (s.helper_ms - s0.helper_ms) / pt,
+                     (s.prof_ms[18] - s0.prof_ms[18]) / pt);
+    if (s.svc_helper_n > s0.svc_helper_n)
+        std::fprintf(stderr, "service thread per token (DS4_PROF): %.1f helper requests, seen to the helper's flag %.2f ms, "
+                             "the flag to its answer out %.3f ms; seen to the helper's take %.3f ms\n",
+                     (double) (s.svc_helper_n - s0.svc_helper_n) / pt, (s.svc_seen_flag_ms - s0.svc_seen_flag_ms) / pt,
+                     (s.svc_flag_ans_ms - s0.svc_flag_ans_ms) / pt, (s.svc_seen_took_ms - s0.svc_seen_took_ms) / pt);
+    {
+        const double ln = (double) (s.svc_job_lead_n - s0.svc_job_lead_n), en = (double) (s.hq_enq_n - s0.hq_enq_n);
+        std::fprintf(stderr, "helper jobs per token (DS4_PROF): %.1f in before their request by %.3f ms each, %.1f not in "
+                             "yet; its thread %.3f ms an enqueue\n",
+                     ln / pt, ln > 0 ? (s.svc_job_lead_ms - s0.svc_job_lead_ms) / ln : 0.0,
+                     (double) (s.svc_job_late_n - s0.svc_job_late_n) / pt,
+                     en > 0 ? (s.hq_enq_ms - s0.hq_enq_ms) / en : 0.0);
+    }
+    std::fprintf(stderr, "attention per token (DS4_PROF): Engram %.2f, split + projections + q %.2f, core %.2f, output + "
+                         "post %.2f ms; the host's Engram wait %.3f ms\n",
+                 d[6], d[7], d[8], d[1], (s.engram_ms - s0.engram_ms) / pt);
+    const double egr = (double) (s.eg_rows - s0.eg_rows);
+    if (egr > 0)
+        std::fprintf(stderr, "Engram per token (DS4_PROF): %.1f lookups, %.1f%% from the row cache, %.1f reads, reads %.3f ms "
+                             "issue to done; %lld batches with reads, %lld > 0.5 ms, %lld > 2 ms, %lld > 10 ms\n",
+                     egr / pt, 100.0 * (double) (s.eg_hits - s0.eg_hits) / egr, (double) (s.eg_reads - s0.eg_reads) / pt,
+                     (s.eg_io_ms - s0.eg_io_ms) / pt, (long long) (s.eg_batches - s0.eg_batches),
+                     (long long) (s.eg_batch_05 - s0.eg_batch_05), (long long) (s.eg_batch_2 - s0.eg_batch_2),
+                     (long long) (s.eg_batch_10 - s0.eg_batch_10));
 }
 
 // The drafts between two stats: each draft position (1st, 2nd, ..) - how often it was verified with every draft
