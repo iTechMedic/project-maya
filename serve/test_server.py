@@ -2481,6 +2481,53 @@ class IdleUnload(unittest.TestCase):
             t.join()
         self.assertEqual((self.engine.restarts, self.engine.running, self.svc.unloaded), (1, True, False))
 
+    def test_the_engines_life_is_one_value_the_monitor_and_health_carry(self):
+        # ENGINE_LIFE: running -> unloaded -> loading -> running; a crash reads as stopped until a request starts it
+        life = lambda: (self.svc.engine_life(), self.get("/metrics")["live"]["engine"], self.get("/health")["engine"])
+        self.assertEqual(life(), ("running",) * 3)
+        self.assertEqual(self.svc.unload(), "unloaded")
+        self.assertEqual(life(), ("unloaded",) * 3)
+        self.assertEqual(self.get("/metrics")["live"]["state"], "unloaded")       # (live.state: as before)
+        seen, slow = [], self.engine.restart
+
+        def restart():                                              # what the Monitor and /health see mid-start
+            seen.append((self.svc.engine_life(), self.get("/metrics")["live"]["engine"], self.get("/health")["engine"],
+                         self.svc.unloaded, self.get("/health")["unloaded"]))
+            slow()
+        self.engine.restart = restart
+        self.svc.ensure_engine()
+        self.assertEqual(seen, [("loading", "loading", "loading", True, True)])   # (unloaded: as it read before)
+        self.assertEqual((life(), self.svc.unloaded), (("running",) * 3, False))
+        self.engine.running = False                                 # it ends by itself (a crash, a signal)
+        self.assertEqual((life(), self.svc.unloaded), (("stopped",) * 3, False))
+        self.svc.ensure_engine()
+        self.assertEqual((life(), self.engine.restarts), (("running",) * 3, 2))
+
+    def test_a_start_that_fails_leaves_the_life_as_it_was(self):
+        self.assertEqual(self.svc.unload(), "unloaded")
+
+        def broken():
+            raise RuntimeError("no GPU")
+        self.engine.restart = broken
+        with self.assertRaises(RuntimeError):
+            self.svc.ensure_engine()
+        self.assertEqual((self.svc.engine_life(), self.svc.unloaded), ("unloaded", True))   # the next request tries again
+        self.engine.restart = LifecycleEngine.restart.__get__(self.engine)
+        self.svc.ensure_engine()
+        self.assertEqual((self.svc.engine_life(), self.svc.unloaded), ("running", False))
+
+    def test_a_move_the_table_does_not_list_is_printed_not_refused(self):
+        with unittest.mock.patch("builtins.print") as out:
+            self.svc._set_life("unloaded")
+            self.svc._set_life("running")                           # (unloaded -> running: not in ENGINE_LIFE)
+        self.assertEqual(self.svc.engine_life(), "running")
+        self.assertIn("unloaded -> running", out.call_args_list[-1].args[0])
+
+    def test_an_engine_without_a_lifecycle_always_runs(self):
+        svc = Service(MockEngine(self.tok, "ok", max_context=CTX), self.tok,
+                      ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        self.assertEqual((svc.engine_life(), svc.metrics()["live"]["engine"]), ("running", "running"))
+
 
 class ModelManagement(unittest.TestCase):
     """#678: llama.cpp's /models/load, /models/unload and /models/sse (Open WebUI's Models page), off unless

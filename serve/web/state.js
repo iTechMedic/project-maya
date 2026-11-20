@@ -52,6 +52,14 @@ export function useStore() {
 }
 export const set = (patch) => { Object.assign(S, patch); emit(); };
 
+// ------------------------------------------------------------------ what the model is doing (GET /metrics' live)
+// live.state - the requests: "reading" | "generating" (one runs), "idle" | "unloaded" (none runs).
+// live.engine - the engine's life (server.py's ENGINE_LIFE): "running" | "loading" | "unloaded" | "stopped":
+//   running -> unloaded (the idle unload) -> loading -> running; a crash: running -> stopped -> loading -> running.
+// From a server older than live.engine: "unloaded" when live.state says so, else "running".
+export const answering = (live) => !!live && (live.state === "reading" || live.state === "generating");
+export const engineLife = (live) => (live && live.engine) || (live && live.state === "unloaded" ? "unloaded" : "running");
+
 // ------------------------------------------------------------------ toasts
 let toastId = 0;
 export function toast(kind, title, text = "", ms = 3500, action = null) {

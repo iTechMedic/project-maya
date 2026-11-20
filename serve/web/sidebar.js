@@ -2,7 +2,7 @@
 // the model's status and what it saved against its API), a chat's ⋯ menu, and the search dialog.
 import {html, useEffect, useLayoutEffect, useMemo, useRef, useState} from "./preact.js";
 import {MOD, SUPPORT_URL, api, ctxfmt, dayGroup, fmt, isPhone, modelName, relTime, store} from "./lib.js";
-import {S, confirmDialog, emit, toast} from "./state.js";
+import {S, confirmDialog, emit, engineLife, toast} from "./state.js";
 import {chatInstructions, chatTitle, deleteChat, exportChat, moveToFolder, newChat, newFolder, openChat, pinChat,
         renameChat, renameFolder, deleteFolder, toggleFolder} from "./chats.js";
 import {Icon, Kbd, MayaMark, Menu, MenuItem, MenuLabel, MenuSep, ModelLogo, trapTab, useDismiss} from "./ui.js";
@@ -21,6 +21,8 @@ export function status(plain = false) {
   if (S.updateWatch) return {tone: "info", text: "Updating"};
   if (S.reload) return {tone: "info", text: "Reloading"};
   if (!m) return {tone: "muted", text: "Connecting…"};
+  const life = engineLife(live);
+  if (life === "loading") return {tone: "info", text: "Loading the model"};
   if (live.queued > 0) return {tone: "warn", text: `${live.queued} queued`};
   if (live.state === "reading") {
     const pct = live.prompt_total && !plain ? Math.round((100 * live.prompt_read) / live.prompt_total) : null;
@@ -30,6 +32,8 @@ export function status(plain = false) {
     const many = live.active > 1 && !plain ? ` · ${live.active} at once` : "";   // (--parallel: answers written together)
     return {tone: "accent", text: (live.tok_s && !plain ? `Writing · ${fmt(live.tok_s, 1)} tok/s` : "Writing") + many};
   }
+  if (life === "unloaded") return {tone: "muted", text: "Unloaded"};          // (the next request loads it again)
+  if (life === "stopped") return {tone: "warn", text: "Engine stopped"};      // (the next request starts it again)
   return {tone: "muted", text: ["Idle", plain ? "" : ctx].filter(Boolean).join(" · ")};
 }
 

@@ -859,6 +859,27 @@ console.log(JSON.stringify({glm: sv.tierShares(n, {experts: 2000}), none: sv.tie
         self.assertIsNone(got["none"]["diskGb"])                                   # (an engine that reports no bytes: the count alone)
         self.assertEqual((got["full"]["disk"], got["full"]["diskGb"]), (0, 0))
 
+    def test_the_status_names_the_engines_life(self):
+        # live.engine (ENGINE_LIFE): the sidebar said "Idle" through a model's minutes-long load after an idle unload,
+        # and for an engine that had ended; a server without live.engine reads as before
+        got = self.node("""
+const sb = await import(web + "/sidebar.js");
+st.S.health = {max_context: 65536};
+const say = (live) => { st.S.metrics = {live}; return sb.status(true); };
+console.log(JSON.stringify({
+  loading: say({state: "unloaded", engine: "loading", queued: 1}), unloaded: say({state: "unloaded", engine: "unloaded"}),
+  stopped: say({state: "idle", engine: "stopped"}), idle: say({state: "idle", engine: "running"}),
+  writing: say({state: "generating", engine: "running"}), oldUnloaded: say({state: "unloaded"}), oldIdle: say({state: "idle"}),
+  life: [st.engineLife({state: "unloaded"}), st.engineLife({state: "idle"}), st.engineLife({state: "idle", engine: "stopped"})],
+  answering: ["reading", "generating", "idle", "unloaded"].map((s) => st.answering({state: s}))}));""")
+        self.assertEqual(got["loading"], {"tone": "info", "text": "Loading the model"})   # (before "1 queued": it waits for it)
+        self.assertEqual(got["unloaded"]["text"], "Unloaded")
+        self.assertEqual(got["stopped"], {"tone": "warn", "text": "Engine stopped"})
+        self.assertEqual((got["idle"]["text"], got["writing"]["text"]), ("Idle", "Writing"))
+        self.assertEqual((got["oldUnloaded"]["text"], got["oldIdle"]["text"]), ("Unloaded", "Idle"))
+        self.assertEqual(got["life"], ["unloaded", "running", "stopped"])
+        self.assertEqual(got["answering"], [True, True, False, False])
+
     def test_qwen_file_reads_are_named_for_what_they_count_and_the_ssd_tip_needs_ssd_only_experts(self):
         # Mercury's Monitor, Qwen3.8 UD-IQ2_XS on 1x V100: 13,199 experts in VRAM, 11,377 in pinned RAM, none on the SSD
         # alone - but 8.23 experts a token read from the model file; the card said "From SSD" and advised more RAM

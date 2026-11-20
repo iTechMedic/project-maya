@@ -2,7 +2,7 @@
 // GPU, the hardware, and the recent requests - all from the server's /metrics (every second) and the engine's STAT lines.
 import {html, useRef, useState} from "./preact.js";
 import {GIB, ago, ctxfmt, fmt, gb, isPhone, kfmt, rate, store} from "./lib.js";
-import {S, copyText, emit, toast} from "./state.js";
+import {S, answering, copyText, emit, engineLife, toast} from "./state.js";
 import {fetchReport, reqAll, speculationView, tierShares} from "./server.js";
 import {newChat} from "./chats.js";
 import {setSide, status} from "./sidebar.js";
@@ -62,8 +62,8 @@ function prefillPeak(m) {
   }
   PF.reading = false;
   if (PF.peak == null || PF.n == null || n == null) return null;
-  if (live.state !== "idle" && n === PF.n) return {rate: PF.peak, now: false, label: "peak this request"};
-  if (live.state === "idle" && n === PF.n + 1) return {rate: PF.peak, now: false, label: "peak last request"};
+  if (answering(live) && n === PF.n) return {rate: PF.peak, now: false, label: "peak this request"};
+  if (!answering(live) && n === PF.n + 1) return {rate: PF.peak, now: false, label: "peak last request"};
   return null;
 }
 
@@ -75,7 +75,7 @@ function Throughput({m}) {
   // prefill: the engine's rate over the tokens it read (not the reused prefix): the peak of the reading this page saw
   // (prefillPeak), else live while a request runs, else the last request's final rate
   const pk = prefillPeak(m);
-  const prefill = pk && pk.rate != null ? pk.rate : live.state !== "idle" ? live.prefill_tok_s_mean
+  const prefill = pk && pk.rate != null ? pk.rate : answering(live) ? live.prefill_tok_s_mean
     : last ? (last.prefill_tok_s != null ? last.prefill_tok_s
               : last.prompt_ms > 0 ? Math.max(0, last.prompt_tokens - (last.reused || 0)) / (last.prompt_ms / 1000) : null)
     : null;
@@ -146,10 +146,16 @@ function RightNow({m}) {
     label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Writing"; tone = "accent";
     pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : null;
     detail = `${fmt(live.generated)} tokens${took(live.elapsed_s)}`;
+  } else if (engineLife(live) === "loading") {
+    label = "Loading"; tone = "info"; detail = "the model: a request waits for it";
+  } else if (engineLife(live) === "unloaded") {
+    label = "Unloaded"; detail = "the next request loads the model again";
+  } else if (engineLife(live) === "stopped") {
+    label = "Stopped"; tone = "warn"; detail = "the engine ended: the next request starts it again";
   } else if (last) {
     detail = `last answer: ${fmt(last.output_tokens)} tokens${took(last.duration_s)}`;
   }
-  const running = live.state !== "idle";
+  const running = answering(live);
   return html`<section class="card card--side" aria-label="Right now">
     <span class="card__title">Right now</span>
     <div class="now"><${Badge} tone=${tone}>${label}<//><span class="now__detail num">${detail}</span></div>
@@ -367,8 +373,9 @@ function GpuStats({r}) {
 function gpuDetail(g, segs, m) {
   const eng = m.engine || {}, live = m.live || {}, last = (m.requests || [])[0];
   const ctx = g.ctx || eng.max_context || 0;
-  const inUse = live.state !== "idle" ? (live.prompt_tokens || 0) + (live.generated || 0)
-              : last ? (last.prompt_tokens || 0) + (last.output_tokens || 0) : 0;
+  // (the conversation a running engine holds; none once it has ended - unloaded, stopped or loading again)
+  const inUse = answering(live) ? (live.prompt_tokens || 0) + (live.generated || 0)
+              : engineLife(live) === "running" && last ? (last.prompt_tokens || 0) + (last.output_tokens || 0) : 0;
   const sub = {
     weights: "attention, shared experts and the other dense tensors",
     kv: (kvWindow(eng, ctx) ? `${ctxfmt(kvWindow(eng, ctx))} of ${ctxfmt(ctx)} positions here, the rest in RAM` : `${ctxfmt(ctx)} positions`) +

@@ -2533,6 +2533,17 @@ class RequestStat:
         return (n1 - start[1] + 1) / max(RATE_MIN_SPAN_S, now - start[0])
 
 
+# The engine's life (Service.engine_life: GET /metrics live.engine, /health engine): the value -> where it may go next.
+# Service._set_life is the one place it changes.
+#   running  -> unloaded   unload(): the idle unload, POST /api/unload
+#   running  -> loading    ensure_engine(): it had ended by itself (a crash, a signal) and a request needs it
+#   unloaded -> loading    ensure_engine(): a request after an unload
+#   loading  -> running    it started;  loading -> unloaded | running: the start failed, as it was before
+# "stopped" is never stored: a "running" engine whose process has ended reads as "stopped" until a request starts it.
+ENGINE_LIFE = {"running": ("unloaded", "loading"), "unloaded": ("loading",), "loading": ("running", "unloaded"),
+               "stopped": ()}
+
+
 class Service:
     def __init__(self, engine: Engine, tokenizer, template: ChatTemplate, model_name: str = "qwen3.8-flash-next",
                  vision: Vision | None = None, sampling_defaults: dict | None = None,
@@ -2587,7 +2598,7 @@ class Service:
         self.idle_unload_s = 0.0
         self.keep_alive_s = None                          # a request's keep_alive (None: idle_unload_s; -1: never)
         self.puller = None                               # serve/model_pull.py: the one model download (the Models page, /api/pull)
-        self.unloaded = False                            # the engine was ended by the idle unload (not by a crash)
+        self._life, self._life_from = "running", None    # ENGINE_LIFE, and while "loading" what it was before
         self._engine_start = threading.Lock()            # ensure_engine: one start, also with --parallel's requests
         self.updater = Updater(MAYA_VERSION)             # About > Updates: a newer release, and updating to it
         # The ids that end an answer server-side.  A string that is not a special token in this vocabulary
@@ -2806,20 +2817,52 @@ class Service:
         with self._engine_start:
             if self.engine.alive():                      # (another request started it meanwhile)
                 return
-            if self.unloaded:
+            was = self._life
+            if was == "unloaded":
                 print("[maya] loading the model again after an idle unload (a minute or so) ...", flush=True)
             else:
                 code = self.engine.exit_code() if hasattr(self.engine, "exit_code") else None
                 print(f"[maya] the engine had stopped (exit code {code}); starting it again "
                       "(a minute or two) ...", flush=True)
-            self.engine.restart()
-            self.unloaded = False
+            self._set_life("loading")
+            try:
+                self.engine.restart()
+            except BaseException:
+                self._set_life(was)                      # (the start failed: as it was, the next request tries again)
+                raise
+            self._set_life("running")
             # the FIFO's places are the conversations the restarted engine reports: a start that came back with other
             # numbers (a different --parallel, no multi= at all) queued or over-admitted every request from here on
             places = max(1, int(getattr(self.engine, "multi", 0) or 1))
             if places != self.fifo.capacity:
                 self.fifo.set_capacity(places)
             print("[maya] the engine is running again", flush=True)
+
+    def _set_life(self, life: str):
+        """The engine's life moves on (ENGINE_LIFE).  A move the table does not list is printed, not refused: serving
+        goes on either way, and the line shows where the table is out of date."""
+        was = self._life
+        if life not in ENGINE_LIFE.get(was, ()):
+            print(f"[maya] the engine's life went {was} -> {life}, which ENGINE_LIFE does not list", flush=True)
+        self._life, self._life_from = life, (was if life == "loading" else None)
+
+    def engine_life(self) -> str:
+        """"running", "loading", "unloaded" or "stopped" (ENGINE_LIFE): what the Monitor, the sidebar and API clients
+        show, instead of piecing it together from alive(), unloaded and the status."""
+        life = self._life
+        if life == "running" and hasattr(self.engine, "alive"):
+            try:
+                if not self.engine.alive():
+                    return "stopped"
+            except Exception:  # noqa: BLE001 - an engine that cannot say must not take /metrics down: as stored
+                pass
+        return life
+
+    @property
+    def unloaded(self) -> bool:
+        """The engine was ended by the idle unload (not by a crash) and has not run since - also while it loads again:
+        /health's "unloaded", /v1/models and /props read it as they did before ENGINE_LIFE."""
+        return self._life == "unloaded" or (self._life == "loading" and self._life_from == "unloaded")
 
     def unload(self, idle_for: float | None = None) -> str:
         """End the engine between requests: "unloaded", "not loaded", "busy" (a request is running or waiting, a context
@@ -2842,10 +2885,10 @@ class Service:
             # its memory back.  (StrataEngine.stop is the request's STOP, not the engine's end.)
             self.engine.close()
             self.engine.ended = True
+            self._set_life("unloaded")                   # (before the wait: not read as "stopped" meanwhile)
             pid = getattr(getattr(self.engine, "proc", None), "pid", None)
             if pid is not None:
                 wait_gpu_release(pid)
-            self.unloaded = True
             print(f"[maya] model unloaded{f' after {idle_for:.0f} s idle' if idle_for else ''} (GPU memory and the "
                   "RAM tier given back); the next request loads it again", flush=True)
             return "unloaded"
@@ -3496,7 +3539,8 @@ class Service:
             state = "generating"
         else:
             state = "unloaded" if self.unloaded else "idle"
-        live = {"state": state, "queued": s.get("queued", 0), "active": active,   # (answering at once: --parallel)
+        live = {"state": state, "engine": self.engine_life(),   # (state: the requests; engine: ENGINE_LIFE)
+                "queued": s.get("queued", 0), "active": active,   # (answering at once: --parallel)
                 "writing": writing, "spec_off": spec_off,   # (the request(s) running asked for no drafting)
                 "phase": s.get("phase") if s.get("busy") else None,
                 "prompt_tokens": s.get("prompt_tokens") if s.get("busy") else None,
@@ -5973,8 +6017,8 @@ def make_handler(svc: Service):
             self.end_headers()
             try:
                 while True:
-                    alive = not hasattr(svc.engine, "alive") or svc.engine.alive()
-                    value = "loaded" if alive else ("unloaded" if svc.unloaded else "loading")
+                    # (llama.cpp's router values; "stopped" reads as "loading": the next request starts it)
+                    value = {"running": "loaded", "unloaded": "unloaded"}.get(svc.engine_life(), "loading")
                     payload = {"object": "list", "data": [{"id": svc.model, "status": {"value": value}}]}
                     self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode())
                     self.wfile.flush()
@@ -6244,6 +6288,7 @@ def make_handler(svc: Service):
                                  # MiniMax's engine-run towers read pictures only
                                  "videos": isinstance(svc.vision, Vision),
                                  "version": MAYA_VERSION, "mcp_tools": bool(svc.mcp), "unloaded": svc.unloaded,
+                                 "engine": svc.engine_life(),   # ENGINE_LIFE: running, loading, unloaded, stopped
                                  # the web chat sends past answers' thinking back (a Qwen3.x template keeps it): the
                                  # history then reads as the model wrote it, and the next turn goes on from there
                                  "history_thinking": bool(getattr(svc.template, "keeps_thinking", False)),
