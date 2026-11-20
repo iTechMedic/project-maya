@@ -596,7 +596,7 @@ with `"loop_guard": false` (or `true`) beside its sampling fields (Chat Completi
 ## Several requests at once
 
 This is a setting of **GLM-5.3-Flash**, **DeepSeek-V4.1-Flash** ([DeepSeek's below](#deepseek-v41-flash-several-requests-at-once))
-and **MiniMax-M3.1-Flash**. A saved conversation slot reuses earlier state; it does not decode requests at the same time.
+and **MiniMax-M3.1-Flash** (not of Hy4-Flash, which answers one request at a time). A saved conversation slot reuses earlier state; it does not decode requests at the same time.
 
 **MiniMax-M3.1-Flash:** `maya-mm3 --parallel N` (the setup and `START-MAYA.bat --parallel 4` write it into the config)
 gives every conversation its own KV cache, always in VRAM: KV streaming and the DSpark drafter are off while N is above
@@ -2329,6 +2329,257 @@ Engine options, in the config's `"args"`:
 |---|---|---|
 | `MAYA_EXPERT_RAM_GB` | unset (what the RAM allows) | caps the experts' RAM tier, in GB (the dashboard's Models page: Experts in RAM) |
 | `MAYA_EXPERT_STAGERS` | Linux: the reads at once the model's drive serves fastest (2, 4, 8 or 16, measured in ~1 s at the first start on a drive and kept in `~/.config/project-maya/drive-reads.txt`; `MAYA_EXPERT_DRIVE_PROBE=0` skips the measurement); otherwise a quarter of the CPU threads, 2 to 8 | the threads that read a layer's experts from the file while the CPU prepares the layer (their reads overlap); `0`: read one by one when the CPU needs them |
+
+## Hy4-Flash
+
+`./maya.sh --setup --model hy4-flash-maya-xs` (or `--hy4-quant maya-xs`; Windows: `START-MAYA.bat`, or pick
+"Hy4-Flash" in the setup's model list) sets up Tencent's [Hy4-Flash](https://huggingface.co/tencent/Hy4-flash) from
+Project Maya's own GGUF quants,
+[peasantsmith/Hy4-Flash-Maya-GGUF](https://huggingface.co/peasantsmith/Hy4-Flash-Maya-GGUF): Hy4-Flash · Maya-XS now
+(the model file 44.8 GB, the routed experts in 2 bits), Maya-S (53.0 GB, 2 and 3 bits), Maya-M (68.4 GB, 3 bits) and
+Maya-L (89.5 GB, 4 bits) - the setup recommends one by the PC's RAM + VRAM. It checks the PC, picks
+the layout and the context that fit the card (4K to 1M: every one that fits its VRAM), downloads the model file and the n-gram
+table, builds the pack and the engine by itself and writes `maya-hy4-flash-maya-xs.json`. `--model-dir <folder>` uses
+files you already have (checked by size and sha256). The model runs on an engine of its own, `maya-hy4`
+(contributed by [@needmorevram](https://github.com/needmorevram), #1040): NVIDIA GPUs (CUDA) from the V100 on, Linux
+and Windows, and AMD GPUs (HIP; its AMD build contributed by [@Cass67](https://github.com/Cass67)) on Linux.
+
+**On AMD.** `--backend hip` builds `build-hip/maya-hy4`. On a GPU that shares the PC's memory (Strix Halo / Gorgon Halo) the engine takes what the RAM has available less a headroom for the system - 8 GB, or a tenth of the RAM if that is more (`HY4_RAM_HEADROOM_GB`) - says the figures in one line at its start, and keeps every routed expert in the GPU's memory where the size fits: the model file is not held twice (its file cache is given back as the weights are copied in), and the n-gram table stays on the SSD. Run on a Gorgon Halo (Radeon 8065S, `gfx1151`); Radeon cards (`gfx1100`) by the contributor, with Tencent's Q4_K_M. Tensor parallel on AMD compiles but has not been run. Windows with an AMD GPU: not tested, not offered by the setup.
+
+**Defaults from Tencent's release**: temperature 0.9, top-p 1.0, no top-k; the thinking budget is 32768 tokens; the
+prompt is the release's own chat template (inside the GGUF). The loop guard is on, as for every model. The model
+thinks at one level or not at all, so the dashboard offers High and Off only:
+
+| `reasoning_effort` | The prompt |
+|---|---|
+| unset, `high`, or any other level (`low`, `max` ...) | `high` |
+| thinking off (`none`) | `no_think` (`chat_template_kwargs: {"reasoning_effort": "no_think"}` works as on the model card) |
+
+**The n-gram table.** Every size shares one file (63.4 GB, Tencent's FP8 table value for value). It stays on the SSD
+and is read page by page; it is not mapped into memory in the background (`HY4_EG_POPULATE`, below) and never loaded
+into RAM whole. Keep it on an SSD / NVMe, never a hard disk.
+
+**VRAM.** Everything but the routed experts has to fit in VRAM; the experts that do not fit run on the CPU from RAM.
+Maya-XS needs about 8.7 / 9.0 / 9.8 GiB of free VRAM at 4K / 8K / 32K context. For a card under about 10 GB the
+setup picks the "8 GB" layout by itself (a second model file with smaller attention weights, 43.6 GB; slightly lower
+quality): about 6.5 / 6.8 GiB at 4K / 8K, and about 7.0 / 7.1 GiB at 16K / 32K (the engine keeps the context's
+cache in 8 bits there by itself: `--kv auto` below). So an 8 GB card that also drives a desktop is offered up to 32K.
+The context's cache sits in VRAM alone in this engine, so the setup and the Models page offer every context up to the
+model's 1M that fits the cards (Maya-XS at 1M: about 19 GiB, a 24 GB card), never one that does not, and say in one
+line when a larger one needs more VRAM. A card with less than about 7 GB cannot run it.
+
+**Pictures** are on where the card has room for one beside the model (the setup downloads Maya's vision file,
+0.8 GB, unless `--no-vision`): 0.8 GB of VRAM for the tower's largest picture, kept free on the main GPU. Where the
+card has less, the engine keeps the room of a smaller picture (0.2 GB at least) and the server makes big pictures
+that size before the model reads them - an 8 GB card with a desktop on it reads pictures of up to about 1.8 million
+pixels at 8K and 512 x 512 at 32K (the engine's start line says the size; fine print in a big picture may be lost).
+Pictures go before the cache's precision: the engine takes the 8-bit cache rows to keep a picture's room before it
+gives pictures up. Only where not even a small picture's room is left does the setup write `--vision off` and say
+so. Images on the Models page turns them on or off; the details are under "Pictures" below.
+
+**Drafting with Maya's sizes:** they draft with Tencent's MTP block through the same `--mtp` as below. The sets made
+from the public release do not carry the block, so it comes as a file of its own (`Hy4-Flash-mtp-BF16.gguf`, 7.5 GB,
+one for every size, from Maya's repo: the block as in AngelSlim's GGUF, its weights unchanged). The setup puts it in
+the model's folder and the pack (`tools/hy4/pack_gguf.py`, `--mtp FILE|none`) indexes it as one more file; the engine
+then finds the block as it does in a set that carries it. It takes about 4 GB of VRAM on the main GPU: the setup
+turns drafting on where that fits beside the model's own parts and a picture's room, and leaves it off (and the block
+out of the pack) on smaller cards and in the 8 GB-card layout. `--drafting on|off` at the setup, or Drafting on the
+Models page, changes it. On AMD an answer written with drafting can differ from the same answer without it from a
+token on (seen with Maya-L on a Radeon; Maya-XS gave the same tokens with and without). `--drafting off`, or the
+Models page's switch, turns drafting off.
+
+**Not available for Hy4-Flash yet** (the dashboard offers no switch for them): `--parallel` (one request at a time
+for now); Mac, and AMD on Windows.
+
+The rest of this section describes the engine itself, as contributed, and what it does with a GGUF set that carries
+the model's MTP block (Tencent's own Q4_K_M from [AngelSlim](https://huggingface.co/AngelSlim/Hy4-flash-GGUF),
+which the setup offers after Maya's sizes): 42 layers; 512 routed experts, 16 a token, and a shared one; MLA attention - 30 sliding-window layers of 512
+positions and 12 whose indexer picks 2048 positions in groups of 4 out of the whole context (up to 1M); four
+hyper-connection streams; and an n-gram (Engram) table read at 4 layers.
+
+**The setup of Tencent's own Q4_K_M.** `./maya.sh --setup --model hy4-flash-q4_k_m` (run on Linux with NVIDIA RTX 30 /
+A100 and newer) builds `maya-hy4`, downloads AngelSlim's Q4_K_M (`tools/hy4/download.json`: pinned to a commit, each
+file's sha256 checked; `--model-dir` takes the files you have), builds the pack and writes `maya-hy4-flash.json`:
+`--pack`, `--max-context` (32K, 64K, 128K or 256K, and 512K / 1M where the smallest GPU has 20 / 40 GB or more - recommended by the smallest GPU's VRAM, since tensor parallel
+keeps the whole cache on every GPU of the group: about 16 KB a token, 9.6 KB in 8 bits) and `--mtp` (`--drafting off`: without). The engine's
+other settings keep their defaults; ones added by hand (`--chunk`, `--reserve-gb`, `--tp` ...) are kept by a setup
+again. Its sampling is Tencent's (`generation_config.json`: temperature 0.9, top-p 1), its level High. The download
+includes the vision tower (AngelSlim's `mmproj-Hy4-flash-bf16.gguf`, 1 GB; `--no-vision`: not downloaded, or
+`--vision off` when it is already there). The dashboard's Models page sets drafting, images, tensor parallel (Auto or
+Off), the VRAM kept free, the prompt chunk and the CPU lane's threads.
+
+**The pack.** The setup builds it by itself. By hand, `python tools/hy4/pack_gguf.py --model <folder>` writes
+`<folder>/maya-hy4/`: the geometry
+(`hy4.txt`), the index of the set's tensors (`tensors.txt`: names, types, offsets - no weights are copied), the
+n-gram hash (`engram.bin`) and the tokenizer with the GGUF's own chat template. It checks the whole set before it
+writes anything; a set still downloading, another architecture or a type the engine does not read is refused.
+Of AngelSlim's sets, Q4_K_M is the build run end to end. Q3_K and IQ2-AH use types the same kernels read but have
+not been run; the SPARK-4Bit builds (NVFP4) are refused.
+
+**The answers.** With AngelSlim's Q4_K_M, greedy answers are the reference build's token for token on the prompts
+compared; over its perplexity tool's logits the KL divergence is the size of the reference's own difference between
+two batch sizes (the model is unusually sensitive to rounding).
+
+Tool calls work as GLM's do: every tag token of Hy4's (`<think:..>`, `<tool_call:..>`, `<arg_key:..>`, ...) carries
+the template's suffix, and the pack's tokenizer names each by GLM's spelling, so the server reads its answers with
+GLM's parser; a turn ends at `<｜hy_end:..｜>`.
+
+**Tensor parallel.** Where two or more GPUs are of one kind (`--tp auto`, the default), every layer runs on all of
+them at once: each holds its share of the attention heads, of the dense and shared FFNs' width and a slice of every
+routed expert (a block of its width, so the slices of an expert add up to it), and a copy of the small matrices and
+the caches. A layer's two partial sums (its attention's, its FFN's) go through pinned host memory, where the host
+adds them in a fixed order, so every GPU's copy of the model's state stays the same bit for bit. The main GPU - the
+fastest memory, measured at the load (`--main-gpu` names another) - holds the output head and the MTP block; where it
+is not of the group's kind it also computes a share of every layer's routed experts, by its memory's speed against
+the others' and as its VRAM allows, from the routing the first member hands it. Where the group cannot hold the
+model (or the context's caches - every member keeps a copy), the layer split runs instead, and an INFO line says
+why.
+
+**Where the experts live.** All of them in VRAM where they fit (about 108 GB with Q4_K_M), on tensor parallel or a
+layer split over the GPUs (the head and the MTP block on the main GPU either way). Where they do not, each layer keeps the same share of its experts in VRAM and the others are computed on
+the CPU from the model's file (the page cache) while the GPU computes its own - the CPU lane, a thread a physical
+core. On a PC of several NUMA nodes each expert's work goes to one node's threads, and a background thread moves
+that expert's pages to the node's memory after the load. A prompt chunk's experts that are not in VRAM go either to
+the CPU lane or are copied to the GPU, whichever the engine measures faster on this PC (its PCIe against its CPU).
+With an expert profile (`--profile`) each layer keeps its most routed experts in VRAM.
+
+**The context.** Only the 12 indexed layers (and the MTP block) keep every position: about 17 KB a token in VRAM
+(F16 latent rows and the indexer's pooled keys), so 128K takes ~2.2 GB and 1M ~17 GB - on every member with tensor
+parallel. The sliding-window layers keep a ring of their 512 positions and 16K more. `--kv q8` keeps them in 8 bits
+instead: the latent's 512 values as int8 in blocks of 32 with an F16 scale and the rotated 64 in F16 (672 bytes a row
+against 1152), the indexer's per-position rows and pooled keys in F16 (the reference's own cache type) - about 9.6 KB
+a token, the sliding-window rings too. `--kv auto`, the default, takes F16 wherever the context fits in VRAM with it
+and the 8-bit rows where it fits only with them (an INFO line says so) - on one GPU, on the layer split and on tensor
+parallel alike: on eight 16 GB members 256K fits only so, on an 8 GB card 16K and 32K. Pictures go before the rows'
+precision. The order, the first that fits: F16 rows and the largest picture's room; 8-bit rows and that room; F16,
+then 8-bit rows and a smaller picture's room; F16 rows text only; 8-bit rows text only (the last two only where
+pictures were not asked for by name). A start that fits with F16 rows and the largest picture's room is never
+changed; `--kv f16` and `--kv q8` force one. The setup's fit and the Models page count on the same choice and do not
+name it: it is the engine's, said in its log. The prompt path
+dequantizes the rows a layer's chunk reads into an F16 scratch once; the token path's attention reads the 8-bit rows
+directly. Their KL divergence against the reference, F16 rows / 8-bit rows: 0.143 / 0.140 (512-token chunks), 0.200 /
+0.193 (2048), 0.239 / 0.256 (4096) - the model moves about this much with any small change of its arithmetic (F32
+instead of F16 tensor-parallel sums: 0.10-0.13 against the F16 run itself; the 8-bit rows 0.11-0.15). The rotated
+part in 8 bits as well (624 bytes a row) measured 0.223 / 0.260 on the 2048 / 4096 files, so it stays F16. Decode and
+prompt speed are the same either way.
+
+**Drafting** (GGUF sets with an MTP block - Tencent's own Q4_K_M - and Maya's sizes with the block's own file
+beside them). `--mtp` loads the GGUF's MTP block (its BF16 weights rounded to Q8_0 at load; its copy of the output
+head for the drafts' top token in Q4_K - only how often a draft holds depends on it) and drafts up to
+`--draft` tokens a step; the model checks them in one window, so the tokens are the model's own: greedy answers are
+the same with and without it on the same placement, and with sampling a draft is kept with the model's probability of
+it. (The MTP block's VRAM can move a layer, or a share of the experts, to another GPU, which rounds a little
+differently: a near-tie can then go the other way.)
+
+Measured by the engine's contributor (@needmorevram) on his own PC, with AngelSlim's Q4_K_M set, not with Maya's
+files - a 9-GPU NVIDIA PC (an RTX 3090 and eight RTX 5060 Ti on PCIe 3, two Xeon sockets):
+
+| Experts in VRAM | Decode, tok/s | Prompt, tok/s |
+|---|---:|---:|
+| all, tensor parallel over the eight 5060 Ti (the 3090: head, drafts, a share of the experts), no drafts | 72 | a little above `--mtp`'s |
+| ... `--mtp`, greedy (code / chat) | 156 / 119-129 | 1980-1990 (8K) / 1680 (16K) |
+| ... `--mtp`, sampled at 0.9 (code / chat) | 141-150 / 116 | the same |
+| all, layer split (`--tp 0`), no drafts | 33.7 | 450-580 |
+| ... `--mtp` (code / prose) | 66 / 55 | the same |
+| 75% (layer split) | 24.5 | - |
+| 50% (with a profile) | 22.5 | 166 |
+| none | 16-17 | 97 |
+
+Tensor parallel there fits up to 128K of context (the 3090 holding a share of the experts frees the others' VRAM);
+with `--chunk 2048` (the prompts' speed above) at 128K it needs `--reserve-gb 0.6`.
+
+**A prompt with tensor parallel.** A chunk's rows go through each layer in two staggered halves - one half's sums
+through the host while the other half computes - and the sums travel by blocks of rows, in F16 with a power-of-two
+factor a row (no overflow; half the bytes over PCIe and through the host's memory; the decode's sums stay F32), the
+host adding the parts in F32 in a fixed order on threads of the GPUs' NUMA node, whose memory holds them. The KL
+divergence against the reference moves from 0.181 to 0.192 (`HY4_TP_F32=1`: the F32 sums). The MTP block's pass over a
+chunk runs on its own scratch and stream of the main GPU, beside the next chunk. After the load the engine runs a
+prompt chunk, a token window and a draft once (about 2 s), so the first request does not pay the GPUs' first
+launches.
+
+**Pictures.** The pack indexes the vision tower's file when it is in the model's folder (the folder's mmproj GGUF of
+this projector, or `--mmproj FILE`; `--mmproj none`: text only), and the engine runs it on the main GPU (`INFO
+vision=hy4`). The tower: a SigLIP-shaped encoder (16 x 16 patches, the learned 128 x 128 position grid resampled
+bilinearly to the picture's, 27 pre-LayerNorm layers of 1152, 16 heads, tanh-GELU MLPs of 4304), then an RMSNorm, each
+2 x 2 block of patches through a strided convolution (4608), an exact GELU and a 1 x 1 convolution to the model's 3072,
+and a learned newline row after each row of blocks: a picture of h x w pixels (sides multiples of 32, 4096 to 4,194,304
+pixels - the server resizes it, Lanczos, aspect kept) is (h / 32) x (w / 32 + 1) image tokens between its start and end
+of image tokens. The weights stay in host memory (the pack's mapping); a picture copies them in a layer at a time and
+takes up to 0.8 GB of the main GPU while it is read, which the plan keeps free (the expert share there is sized
+without it). Attention runs in blocks of query rows (128 MB of scores at a time), its products in TF32
+(`HY4_VISION_F32=1`: F32), the MLP 4096 rows at a time. Against the reference build's encoder (on the CPU) the rows
+differ by about 0.4% (relative), cosine 0.99999. An image token's position takes its picture's row instead of the
+token's embedding (the MTP block's too) and has no Engram lookup (a later token's n-gram pads it), as in the reference.
+The state is shared with the next request only where the same picture sits at the same place. On an RTX 3090:
+1024 x 768 (792 tokens) in about 0.25 s, 2048 x 2048 (4,160 tokens) in about 5.4 s - there attention over all 16,384
+patches is most of it. `maya-hy4 --pack <pack> --encode-image FILE.rgb --size WxH --dump-image OUT [--gpus I]` runs
+the tower alone (raw RGB in, F32 rows out). A quantized mmproj file is read too (Maya's: the layers' matrices in Q8_0,
+F16 where a row is no multiple of 32): those matrices are made BF16 as a layer is copied in, and its rows are within
+cosine 0.99996 of the BF16 file's. Where the main GPU has no room for the tower's largest picture beside the model's
+own parts, the engine keeps the room of a smaller one - as many patches as fit, a sixteenth of the largest at least
+(512 x 512) - and says the size (`INFO pictures up to N pixels on this GPU`, and `vision_max_pixels` to the server,
+which resizes to it). On an RTX 3050 8 GB with a desktop on it: the largest picture at 4K, 1.77 million pixels at 8K,
+0.71 million at 16K, 512 x 512 at 32K. Where not even that fits the engine starts text only and says so (`NOTE vision
+off`); `--vision on` asks for the tower by name and stops with the error instead. Keeping the picture's room free leaves a little less VRAM for routed experts (on a 32 GB V100
+with Maya-XS: 59% of them in VRAM instead of 61%, decode about 3% slower); `--vision off` gives it back.
+
+Engine options, in the config's `"args"`:
+
+| Option | Default | What it does |
+|---|---|---|
+| `--pack` | - | the pack's folder (`<model folder>/maya-hy4`) |
+| `--max-context` | 32768 | the context, in tokens (rounded up to a group of 4); `0`: the model's 1M |
+| `--gpus` | every GPU the config gives | the GPUs, in order |
+| `--tp` | `auto` | tensor parallel over this many GPUs of one kind; `auto`: the largest group of one kind when it holds the model and the context, else the layer split; `0`: the layer split |
+| `--main-gpu` | the fastest (measured) | the GPU for the output head and the MTP block, an index into `--gpus` |
+| `--layer-split` | `auto` | the layer split: the layers a GPU holds, comma-separated (`auto`: by each GPU's free VRAM) |
+| `--reserve-gb` | 0.75 | VRAM each GPU keeps free beyond the plan |
+| `--chunk` | `auto` | prompt tokens a forward takes at most. `auto` (no `--chunk`): the engine's plan takes the largest of 4096, 2048 and 1024 at every start whose plan comes to what 1024's does - the same layout (tensor parallel stays tensor parallel), the same rows of the cache, pictures as large; where a larger chunk would cost one of these, the next smaller is taken (`INFO prompt chunk: N tokens`). Larger chunks read long prompts faster: a chunk has a fixed cost, and the experts that are not in VRAM are sent to the GPU once a chunk. What it costs: about 1.2 GB of VRAM for every 1024 tokens of chunk on each GPU that runs layers (about 3.5 GB more at 4096 than at 1024; with `--mtp` on tensor parallel as much again on the head's GPU for the block's own pass, where that fits - else the pass runs in line, said). On a PC whose routed experts do not all fit in VRAM that room holds fewer of them, so more are computed on the CPU while the model answers. `--chunk N` sets one by hand (the setup and the Models page keep it); a chunk given by hand that tensor parallel cannot hold falls to the layer split, as before. The chunk changes the prompt's rounding (as `--prefill N` does for GLM): the same chunk gives the same answers, another chunk can give another greedy answer |
+| `--vram-experts` | 1 (as many as fit) | the share of each layer's routed experts kept in VRAM, 0 to 1; the rest run on the CPU lane |
+| `--cpu-threads` | one a physical core but the first | the CPU lane's threads besides the calling one |
+| `--profile` | - | an expert profile (uint32 routings, [layers][experts]): each layer's most routed experts are the ones in VRAM |
+| `--profile-out` | - | where the routings counted in this run (with `--profile`'s) are written, after each request |
+| `--mtp` | off | the MTP block drafts tokens, the model checks them (the same tokens) |
+| `--draft` | 3 | with `--mtp`: drafts a step at most |
+| `--draft-floor` | 0.55 | with `--mtp`: the drafts end at one the block gives less than this probability |
+| `--eos` | the GGUF's | the token ids that end an answer |
+| `--kv` | `auto` | the latent cache's rows: `f16`, `q8` (8 bits: 58% of the VRAM a position), or `auto` - F16 where the context fits in VRAM with it, the 8-bit rows where it fits only with them (any layout: one GPU, the layer split, tensor parallel) |
+| `--vision` | on when the pack has the tower | `off`: text only, and no room kept for pictures on the main GPU; `on`: an error when the pack has no tower |
+| `--images` | - | with `--ids`: a pictures file (the server's GENI file, `MMI1`) for the prompt's image spans |
+
+A request's `spec` (0 / 1) turns the drafts off or on for it.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HY4_LANE_WAITS` | on | the CPU lane's waits as a set: `1` the measured ones (the three variables below at their defaults), `0` the plain ones (a 3 ms spin, no polling, the engine's thread not pinned). The measured waits keep the lane's CPU cores busy through a whole answer: decoding is faster, and the CPU runs hotter while the model answers - `HY4_LANE_WAITS=0` (in the config's `env`, or the Models page's environment box) turns them off |
+| `HY4_LANE_SPIN_US` | measured | the CPU lane: how long its threads spin for the next layer before they sleep, in microseconds - measured: 3 ms at least and twice the longest gap between two layers seen lately (a sleeping thread comes back late on some PCs); `0`: asleep at once |
+| `HY4_LANE_WARM` | off | `1`: the CPU lane on a PC of one NUMA node - after the load a background thread reads the lane's experts into the engine's memory when the free RAM (file cache included) holds them all, so later answers do not pay each expert's first read (or the disk after a cold start); it takes a minute or two and slows an answer beside it a little meanwhile |
+| `HY4_LANE_PIN_CALLER` | on | the CPU lane: the engine's own thread stays on the core the lane's threads leave free; `0`: wherever the system runs it |
+| `HY4_EV_POLL_US` | 2000 | the CPU lane: how long the engine polls for a layer's routes before it sleeps on the GPU's event; `0`: asleep at once |
+| `HY4_LANE_NT` | 32 | the CPU lane: a prompt's tokens an expert's weights are read once for (1-64) |
+| `HY4_RAM_HEADROOM_GB` | max(8, a tenth of the RAM) | a GPU that shares the PC's memory (Strix Halo / Gorgon Halo, Linux): the memory (GB) the engine leaves the system and the other programs - what the RAM has available beyond it is the model's |
+| `HY4_VISION_F32` | off | the vision tower's attention products in F32 instead of TF32 (a little slower where TF32 is faster) |
+| `HY4_TP_HELPER` | by speed | tensor parallel: `0` no expert share for the GPUs outside the group; `k`: k slices each (as their VRAM allows) |
+| `HY4_TP_MIXED` | off | tensor parallel over GPUs of different kinds (their copies of the state may drift apart) |
+| `HY4_DENSE_MAX` | picked at the start | prompts: up to how many earlier positions the 12 indexed layers' attention runs on the tensor cores (one FP16 product over every earlier key, the indexer's picks kept by a mask) before it goes to the gathering kernel the token path uses. Both read the indexer's same picks, so the limit moves no pick - only how a token's attention is summed (answers can differ in the last bits, as between two prompt chunks). The tensor-core path's time grows with the positions, the gathering kernel's does not: on Tesla V100s they cross at about 24,000. At every start the engine takes the largest of 24576 / 16384 whose buffers (about 215 MB a GPU for 24576, a third of that on a tensor-parallel member) fit the plan without costing the layout, the cache's rows, the pictures, the MTP pass's own scratch or a routed expert its place in VRAM, on GPUs with tensor cores (compute capability 7.0 and later), and 8192 otherwise; its start line says which (`INFO prompts: the indexed layers' attention on the tensor cores up to N positions`). So GPUs that hold every expert (tensor parallel, a layer split with room) take a longer span, and a card that holds a part of the experts beside the CPU lane keeps 8192 - its decoding and its answers stay as they were. `HY4_DENSE_MAX=N` tries N alone (up to 65536; it is taken where the plan holds it, also where it moves some experts from the VRAM to the CPU lane: on one Tesla V100 a 16K prompt read 7% faster with 24576, with 1.5% fewer experts in VRAM); `HY4_DENSE_MAX=8192`: as before v1.1.68 |
+| `HY4_TP_CHECK` | off | debugging: after each forward, every member's copy of the state compared |
+| `HY4_TP_PROF` | off | debugging: the host's waits and sums a token window |
+| `HY4_TP_LATENT_SUM` | off | tensor parallel: the FFN's partials summed in the latent space, projected up after the sum (a third more to send) |
+| `HY4_TP_EV`, `HY4_TP_EV_M` | off | debugging: a member's GPU time by part of each layer (events), member 0 or the one named |
+| `HY4_TP_F32` | off | tensor parallel: a prompt chunk's sums in F32 (twice the bytes; the earlier numbers) |
+| `HY4_MTP_SYNC` | off | the MTP block's pass over a prompt chunk in line, after the chunk, on the head's own scratch (tensor parallel takes this by itself, with an INFO line, where the pass's own scratch - a whole chunk's buffers on the head's GPU - is not in a member's plan) |
+| `HY4_NO_WARMUP` | off | no warm-up after the load (the first request then pays the first launches: ~1 s on a long prompt) |
+| `HY4_TP_NO_STAGGER`, `HY4_TP_ONE_BLOCK`, `HY4_TP_PULL_MAIN` | off | A/B: a chunk in one piece, its sums in one block, read back on the main stream (each slower) |
+| `HY4_TP_SKIP_SUM`, `HY4_TP_SKIP_COPY` | off | debugging only (the answers are no longer the model's): the host's sums, or the copies, left out - what each costs |
+| `HY4_ENGRAM_EPS` | 1.1920929e-07 | the Engram norms' eps (the graph's norms have none set: FP32's machine epsilon; `0.0078125` is BF16's, what the release takes when it runs in BF16). The pack's `--engram-eps` sets it for a model |
+| `HY4_ENGRAM_SCALES` | on when the set has them | `0`: the Engram table's row scales (`*.engram-scales.bf16` beside a table of per-row scaled codes) are not applied |
+| `HY4_EG_POPULATE` | off | `1`: the Engram table's pages are mapped into the engine in the background after the load (the whole table goes through the page cache); off, the table stays on the disk and each looked-up page is read at its first use |
+| `HY4_DRAFT_HEAD` | `q4k` | `q8`: the drafts' head in Q8_0 |
+| `HY4_GEMV_OLD`, `HY4_GROUP_SERIAL`, `HY4_TOP1_ONE`, `HY4_HC_ONE`, `HY4_ROUTER_WARP`, `HY4_TP_SUM_EACH`, `HY4_TP_HAND0`, `HY4_TP_HAND_INLINE`, `HY4_MTP_EAGER`, `HY4_EG_SERIAL` | off | A/B switches: the earlier kernels and paths these replaced (the same results, slower) |
+| `HY4_ROUTER_SORT` | off | the router's earlier block-wide sort instead of the warp's picks (the same picks) |
+| `HY4_PROF` | off | debugging: each forward's GPU time by part |
+| `HY4_DUMP` | off | debugging: each layer's sums |
+| `HY4_INJECT`, `HY4_INJECT_FROM`, `HY4_SAVE` | off | debugging: a layer's inputs taken from a reference dump to compare one layer at a time |
 
 ## GLM-5.3 (744B)
 
