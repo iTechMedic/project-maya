@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project Maya - set up and start GLM-5.3 (744B), GLM-5.3-Flash, DeepSeek-V4.1-Flash-1017, MiniMax-M3.1-Flash or Qwen-3.8-Flash-Next
+"""Kestrel - set up and start GLM-5.3 (744B), GLM-5.3-Flash, DeepSeek-V4.1-Flash-1017, MiniMax-M3.1-Flash or Qwen-3.8-Flash-Next
 (CYBER-FROST) on your own GPU(s).  Qwen-3.8-Flash-Next (CYBER-FROST): CUDA from V100 on and HIP, Linux and Windows, pictures too.
 Hy4-Flash: CUDA from V100 on, Linux and Windows, pictures too (Tencent's own Q4_K_M with its MTP drafting: run on
 RTX 30 / A100 and newer, Linux).
@@ -20,10 +20,10 @@ On Windows START-KESTREL.bat takes the same options.  Both make the private Pyth
 file.  Its helpers (setup.py) do the PC checks, pip, llama.cpp's source and resumable downloads.
 
 In a terminal the setup runs on a screen of its own (tools/setup_tui.py): the steps, what runs now with a progress
-bar, and the questions as menus - then Maya runs on the same screen, and every later start too: its dashboard (the
+bar, and the questions as menus - then Kestrel runs on the same screen, and every later start too: its dashboard (the
 Monitor's numbers from the engine's GET /metrics), its server's output, Ctrl+C stops it.  Its library, Textual, comes
-with Maya (third_party/wheels) and goes into .venv from there - nothing is downloaded.  --plain or a pipe: plain text,
-and Maya in the terminal as before; --yes: the setup in plain text.
+with Kestrel (third_party/wheels) and goes into .venv from there - nothing is downloaded.  --plain or a pipe: plain text,
+and Kestrel in the terminal as before; --yes: the setup in plain text.
 
 What the first run does (each step is skipped when it is already done) - first it asks which model: GLM-5.3-Flash
 (the steps below) or DeepSeek-V4.1-Flash-1017 (the same steps for its own engine, build/maya-ds4: LibertAIDAI's EXL3
@@ -10442,7 +10442,9 @@ def model_option(a) -> str | None:
 def main() -> int:
     N.alias_env(os.environ)   # (MAYA_* settings under the names the code and the engines read, for all it starts)
     stop_signals()            # (SIGTERM / SIGHUP stop it as Ctrl+C does: the server it runs with it)
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # (the usage line names the start the user runs, not this file: START-KESTREL.bat on Windows, else ./kestrel.sh)
+    ap = argparse.ArgumentParser(prog="START-KESTREL.bat" if os.name == "nt" else "./kestrel.sh", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=["cuda", "hip", "metal"],
                     help="GPU backend (HIP: gfx1100/gfx1201/gfx1151 on Linux and Windows; Metal: experimental, "
                          "Apple Silicon Macs, text only; the default on a Mac)")
@@ -10492,7 +10494,7 @@ def main() -> int:
                          "quant also as --model deepseek-maya-s / -maya-m / -maya-xs")
     ap.add_argument("--mm3-quant", choices=list(MM3_QUANTS) + list(Q.MM3_QUANT_ALIASES),
                     help=f"{MM3}'s files: exl3 = Mia-AiLab's EXL3 quant at 3.5 bits (NVIDIA; pictures, DSpark), "
-                         "maya-xs (or gguf-xs) = Maya's MiniMax-M3.1-Flash-Maya-XS (experts ~1.6 bits, ~93 GB: a 128 GB "
+                         "maya-xs (or gguf-xs) = Kestrel's MiniMax-M3.1-Flash-Maya-XS (experts ~1.6 bits, ~93 GB: a 128 GB "
                          "PC), maya-s (gguf-s) = MiniMax-M3.1-Flash-Maya-S (~2.1 bits, ~122 GB) - the GGUFs on NVIDIA "
                          "from V100 on and on AMD; with --model-dir: the files you have (the same as --model "
                          "minimax-maya-xs / minimax-maya-s)")
