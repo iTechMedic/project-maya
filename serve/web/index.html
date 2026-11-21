@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#19191d">
-<title>Project Maya</title>
+<meta name="theme-color" content="#0b1a2e">
+<title>Kestrel</title>
 <link rel="manifest" href="web/manifest.webmanifest">
+<link rel="icon" href="web/icon.svg" type="image/svg+xml">
 <link rel="icon" href="web/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="web/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="web/icon-180.png">
 <link rel="stylesheet" href="web/tokens.css">
+<link rel="stylesheet" href="web/kestrel.css">
 <link rel="stylesheet" href="web/components.css">
 <link rel="stylesheet" href="web/app.css">
 <link rel="stylesheet" href="web/settings.css">
@@ -24,14 +26,15 @@
     let t = localStorage.getItem("maya.theme") || "dark";
     if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
     document.documentElement.dataset.theme = t;
-    // (and the colours: "maya.scheme" violet, else the default)
-    if (localStorage.getItem("maya.scheme") === "violet") document.documentElement.dataset.scheme = "violet";
+    // (and the colours: "maya.scheme" ember, glacier or midnight on top of Kestrel's own, else its own - state.js SCHEMES)
+    const sc = localStorage.getItem("maya.scheme");
+    if (["ember", "glacier", "midnight"].includes(sc)) document.documentElement.dataset.scheme = sc;
   } catch (e) {}
 </script>
 </head>
 <body>
 <div id="app"></div>
-<noscript><p style="padding:24px;font-family:system-ui,sans-serif">Project Maya's page needs JavaScript. The API works without it.</p></noscript>
+<noscript><p style="padding:24px;font-family:system-ui,sans-serif">Kestrel's page needs JavaScript. The API works without it.</p></noscript>
 <script type="module" src="web/app.js"></script>
 </body>
 </html>

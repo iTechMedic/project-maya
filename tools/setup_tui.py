@@ -70,7 +70,7 @@ class SetupApp(App):
                 Binding("shift+tab", "browse(-1)", show=False, priority=True),
                 Binding("escape", "live", show=False)]
     ENABLE_COMMAND_PALETTE = False
-    TITLE = "Project Maya"
+    TITLE = "Kestrel"
 
     def __init__(self, bridge: Bridge, body, version: str, me: str, log_path: Path | None, steps: bool = True):
         super().__init__()
@@ -119,9 +119,9 @@ class SetupApp(App):
 
     def on_mount(self) -> None:
         self.register_theme(THEME)
-        self.theme = "maya"
+        self.theme = THEME.name
         self.query_one("#dash").display = False
-        self.query_one("#top").border_title = Text.assemble(("│", EDGE), ("Project Maya", f"bold {INK}"),
+        self.query_one("#top").border_title = Text.assemble(("│", EDGE), ("Kestrel", f"bold {INK}"),
                                                             (f" v{self.version}", MUTED), ("│", EDGE))
         out = self.query_one("#output")
         out.border_title = title("Output")
@@ -383,7 +383,7 @@ class SetupApp(App):
         self.abouts = [" ".join(x for x in (o[2], " ".join(outro)) if x) for o in options]
         box = self.query_one("#ask")
         named = kind != "fail" and len(question) <= 40  # a short question names the box, a long one opens it
-        stopped = "Maya stopped" if self.serving is not None else "The setup stopped"   # (once Maya ran: its server)
+        stopped = "Kestrel stopped" if self.serving is not None else "The setup stopped"   # (once Maya ran: its server)
         box.border_title = title(stopped, f"bold {DANGER}") if kind == "fail" else \
             title(question if named else "Question")
         body = Text.assemble((question, f"bold {DANGER if kind == 'fail' else INK}") if not named else "",
@@ -542,7 +542,7 @@ class SetupApp(App):
         keys += [("↑↓", "Scroll")] * (maya and live) + \
             [("Tab", "Log" if maya and live else "Steps" if self.steps else "Dashboard")] + \
             ([] if live or not self.steps else [("Esc", "Dashboard" if maya else "Live")]) + \
-            [("Ctrl+C", "Stop Maya" if maya else "Stop")]
+            [("Ctrl+C", "Stop Kestrel" if maya else "Stop")]
         self.query_one("#main").border_subtitle = hints(*keys)
 
 
@@ -583,6 +583,6 @@ def run(body, version: str, log_path: Path | None, me: str, steps: bool = True):
         S.fail(*value, end=S.STOPPED if app.serving is None else None)
     if kind == "error":
         raise value
-    print(f"  Maya stopped: {me} starts it again." if app.serving else
+    print(f"  Kestrel stopped: {me} starts it again." if app.serving else
           f"  Stopped: everything finished so far is kept, and {me} continues where it stopped.")
     raise KeyboardInterrupt

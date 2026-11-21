@@ -415,7 +415,7 @@ class Screen(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.serving["speed"], "512 tokens at 42.1 tok/s")
             self.assertIn("ready: http://127.0.0.1:8080/v1  (OpenAI: /v1/chat/completions)", app.served)   # (its Log)
             await pilot.press("ctrl+c")
-            self.assertTrue(app.screen.serving)          # "Stop Maya?"
+            self.assertTrue(app.screen.serving)          # "Stop Kestrel?"
             await pilot.press("ctrl+c")
         self.assertEqual(app.return_value, ("stopped", None))
         bridge.finish(10)

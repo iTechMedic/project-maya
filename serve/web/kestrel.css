@@ -1,0 +1,219 @@
+/* Kestrel's colours, loaded after tokens.css: the same --st-* names, so every page draws them without a change of its
+   own, and tokens.css stays as upstream ships it (its updates merge without conflicts here).
+   Dark (the default) is Dusk: navy surfaces, Kestrel orange for actions and the numbers that matter.  Light is Dawn:
+   warm white, navy text, the same orange.  Settings > General > Colours adds a scheme on top, <html data-scheme=...>:
+   ember (charcoal, no blue), glacier (navy, an ice-blue accent), midnight (high contrast).  Text on the accent is navy
+   (or black), never white: the orange takes 6.9:1 with navy and fails with white. */
+
+/* ---------------------------------------------------------------- Dusk (dark, the default) */
+:root{
+  --st-side:#081322;
+  --st-bg:#0b1a2e;
+  --st-surface:#12243d;
+  --st-surface-2:#1a2f4d;
+  --st-surface-3:#23395a;
+  --st-open:rgba(234,240,248,.08);
+  --st-glass-hover:rgba(234,240,248,.05);
+  --st-side-glass:color-mix(in srgb,#081322 88%,transparent);
+  --st-line:#203553;
+  --st-line-strong:#2b4366;
+  --st-card:#12243d;
+  --st-inset:#0e1f36;
+  --st-hair:#203553;
+  --st-fill:#1a2f4d;
+  --st-fill-hover:#23395a;
+  --st-seg-on:#2b4366;
+  --st-ink:#eaf0f8;
+  --st-ink-soft:#c3cedd;
+  --st-ink-muted:#8fa0b8;
+
+  --st-accent:#ff8a3d;
+  --st-accent-2:#5ea8ff;
+  --st-accent-hover:#ffa05e;
+  --st-accent-ink:#0b1a2e;
+  --st-accent-text:#ffb27a;
+  --st-accent-tint:rgba(255,138,61,.14);
+  --st-focus:#ffa05e;
+
+  --st-info:#5ea8ff;   --st-info-tint:rgba(94,168,255,.13);   --st-info-text:#9cc8ff;
+
+  --st-code-bg:#071120; --st-code-head:#0e1d33; --st-code-ink:#e4ecf8; --st-code-dim:#9aabc4;
+
+  --st-shadow-pop:0 0 0 1px #2b4366,0 12px 32px rgba(0,0,0,.45);
+  --st-shadow-soft:0 0 0 1px #23395a,0 4px 14px rgba(0,0,0,.18);
+  --st-glass-bg:rgba(26,47,77,.42);
+  --st-glass-bar:rgba(11,26,46,.74);
+
+  /* the Kestrel mark's parts (ui.js KestrelMark): its tile, the head, the beak, the eye and the stripe */
+  --k-mark-tile:var(--st-accent);
+  --k-mark-head:#0b1a2e;
+  --k-mark-beak:#ffffff;
+  --k-mark-eye:var(--st-accent);
+}
+
+/* ---------------------------------------------------------------- Dawn (light) */
+[data-theme="light"]{
+  --st-side:#f3f0ea;
+  --st-bg:#ffffff;
+  --st-surface:#ffffff;
+  --st-surface-2:#f1f4f8;
+  --st-surface-3:#e4e9f0;
+  --st-open:rgba(11,26,46,.06);
+  --st-glass-hover:rgba(11,26,46,.04);
+  --st-side-glass:color-mix(in srgb,#f3f0ea 88%,transparent);
+  --st-line:#dde3eb;
+  --st-line-strong:#c9d2de;
+  --st-card:#f6f7f9;
+  --st-inset:#ffffff;
+  --st-hair:#e2e7ee;
+  --st-fill:#eaeef3;
+  --st-fill-hover:#dee4ec;
+  --st-seg-on:#ffffff;
+  --st-ink:#0b1a2e;
+  --st-ink-soft:#2a3b55;
+  --st-ink-muted:#52627a;
+
+  --st-accent:#f28a3c;
+  --st-accent-2:#1f6fd1;
+  --st-accent-hover:#e57a2b;
+  --st-accent-ink:#0b1a2e;
+  --st-accent-text:#b5480a;
+  --st-accent-tint:#fff1e6;
+  --st-focus:#c2510a;
+
+  --st-info:#1f6fd1;   --st-info-tint:#e6f0fc;   --st-info-text:#1a5db0;
+
+  --st-code-bg:#0b1a2e; --st-code-head:#12243d;
+
+  --st-shadow-pop:0 0 0 1px #c9d2de,0 12px 32px rgba(11,26,46,.12);
+  --st-shadow-soft:0 0 0 1px #dde3eb,0 4px 14px rgba(11,26,46,.05);
+  --st-glass-bg:rgba(255,255,255,.55);
+  --st-glass-bar:rgba(255,255,255,.76);
+}
+
+/* ---------------------------------------------------------------- Ember: charcoal and orange, no blue */
+:root[data-scheme="ember"]:not([data-theme="light"]){
+  --st-side:#0e0e10;
+  --st-bg:#151517;
+  --st-surface:#1f1f23;
+  --st-surface-2:#29292e;
+  --st-surface-3:#34343a;
+  --st-side-glass:color-mix(in srgb,#0e0e10 88%,transparent);
+  --st-line:#2c2c31;
+  --st-line-strong:#3a3a40;
+  --st-card:#1f1f23;
+  --st-inset:#18181b;
+  --st-hair:#2c2c31;
+  --st-fill:#29292e;
+  --st-fill-hover:#34343a;
+  --st-seg-on:#3e3a36;
+  --st-ink:#f2efea;
+  --st-ink-soft:#cfc9c0;
+  --st-ink-muted:#a39d94;
+  --st-accent:#ff7a1a;
+  --st-accent-2:#f2b35e;
+  --st-accent-hover:#ff9142;
+  --st-accent-ink:#151517;
+  --st-accent-text:#ffa463;
+  --st-accent-tint:rgba(255,122,26,.14);
+  --st-focus:#ff9142;
+  --st-info:#f2b35e;   --st-info-tint:rgba(242,179,94,.13);   --st-info-text:#f7cd8e;
+  --st-code-bg:#0b0b0c; --st-code-head:#141416; --st-code-ink:#ece8e2; --st-code-dim:#a8a197;
+  --st-shadow-pop:0 0 0 1px #3a3a40,0 12px 32px rgba(0,0,0,.5);
+  --st-glass-bg:rgba(41,41,46,.42);
+  --st-glass-bar:rgba(21,21,23,.74);
+  --k-mark-head:#151517;
+}
+:root[data-scheme="ember"][data-theme="light"]{
+  --st-side:#f5f1ec;
+  --st-bg:#fffdfa;
+  --st-side-glass:color-mix(in srgb,#f5f1ec 88%,transparent);
+  --st-accent:#f27a24;
+  --st-accent-2:#b5480a;
+  --st-accent-hover:#e06a14;
+  --st-accent-ink:#151517;
+  --st-accent-text:#a8400a;
+  --st-accent-tint:#fff0e3;
+  --st-focus:#a8400a;
+  --st-info:#b86b0f;   --st-info-tint:#fdf1e0;   --st-info-text:#8a4f0a;
+}
+
+/* ---------------------------------------------------------------- Glacier: navy with an ice-blue accent */
+:root[data-scheme="glacier"]:not([data-theme="light"]){
+  --st-accent:#3cc8e6;
+  --st-accent-2:#ff8a3d;
+  --st-accent-hover:#63d5ee;
+  --st-accent-ink:#081322;
+  --st-accent-text:#8be3f5;
+  --st-accent-tint:rgba(60,200,230,.14);
+  --st-focus:#63d5ee;
+  --st-info:#ff8a3d;   --st-info-tint:rgba(255,138,61,.13);   --st-info-text:#ffb27a;
+  --k-mark-head:#081322;
+}
+:root[data-scheme="glacier"][data-theme="light"]{
+  --st-accent:#0891b2;
+  --st-accent-2:#c2510a;
+  --st-accent-hover:#0e7490;
+  --st-accent-ink:#081322;
+  --st-accent-text:#0e7490;
+  --st-accent-tint:#e3f6fa;
+  --st-focus:#0e7490;
+}
+
+/* ---------------------------------------------------------------- Midnight: high contrast */
+:root[data-scheme="midnight"]:not([data-theme="light"]){
+  --st-side:#000000;
+  --st-bg:#04080f;
+  --st-surface:#0b1424;
+  --st-surface-2:#142238;
+  --st-surface-3:#1d2e48;
+  --st-side-glass:#000000;
+  --st-line:#3a5277;
+  --st-line-strong:#5070a0;
+  --st-card:#0b1424;
+  --st-inset:#070d18;
+  --st-hair:#2e4466;
+  --st-fill:#142238;
+  --st-fill-hover:#1d2e48;
+  --st-seg-on:#2e4466;
+  --st-ink:#ffffff;
+  --st-ink-soft:#e2e8f0;
+  --st-ink-muted:#b8c4d6;
+  --st-accent:#ffa052;
+  --st-accent-hover:#ffb574;
+  --st-accent-ink:#000000;
+  --st-accent-text:#ffc08a;
+  --st-accent-tint:rgba(255,160,82,.16);
+  --st-focus:#ffc08a;
+  --st-info:#7cc0ff;   --st-info-text:#b0d8ff;
+  --st-code-bg:#000000; --st-code-head:#0b1424;
+  --st-glass-bg:rgba(11,20,36,.6);
+  --st-glass-bar:rgba(0,0,0,.82);
+  --k-mark-head:#000000;
+}
+:root[data-scheme="midnight"][data-theme="light"]{
+  --st-side:#f2f4f7;
+  --st-side-glass:#f2f4f7;
+  --st-line:#9aa8bc;
+  --st-line-strong:#6e7f98;
+  --st-hair:#b4bfce;
+  --st-ink:#000000;
+  --st-ink-soft:#1a2638;
+  --st-ink-muted:#3a4a60;
+  --st-accent:#f28a3c;
+  --st-accent-ink:#000000;
+  --st-accent-text:#9a3a00;
+  --st-focus:#9a3a00;
+}
+
+/* the Kestrel mark in the sidebar (ui.js KestrelMark) */
+.k-mark { display: block; flex: none; }
+.k-mark .k-tile { fill: var(--k-mark-tile); }
+.k-mark .k-head { fill: var(--k-mark-head); }
+.k-mark .k-beak { fill: var(--k-mark-beak); }
+.k-mark .k-eye  { fill: var(--k-mark-eye); }
+.side__brand .k-word { font-weight: 700; letter-spacing: -.02em; }
+
+/* upstream's author's support links (the sidebar's heart, the line in Settings) point to their sponsor pages: not
+   shown in Kestrel - the markup stays as upstream ships it, so its updates merge cleanly */
+.heart-link, .set-support { display: none !important; }

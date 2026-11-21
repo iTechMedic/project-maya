@@ -17,13 +17,15 @@ from textual.theme import Theme
 from textual.widgets import OptionList, RichLog, Static
 
 STEP_LINE = re.compile(r"=== Step (\d+): (.*) ===$")   # (Bridge.step's line)
-# the dashboard's dark theme (serve/web/tokens.css); EDGE: the outer boxes, a step brighter than its card lines
-BG, SURFACE3, LINE, EDGE = "#090a14", "#1e2240", "#252a4a", "#3d4373"
-INK, INK_SOFT, MUTED, FAINT = "#eceefe", "#c3c7e6", "#8a8fb4", "#555b88"
-ACCENT, ACCENT2, ACCENT_TEXT, INFO_TEXT = "#8b7cff", "#38bdf8", "#b4aaff", "#7dd3fc"
-OK, OK_TEXT, WARN, DANGER, TINT = "#34d399", "#6ee7b7", "#fbbf24", "#fb7185", "#1d1b37"   # TINT: --st-accent-tint
-THEME = Theme(name="maya", primary=ACCENT, secondary=ACCENT2, accent=ACCENT, foreground=INK, background=BG,
-              surface="#11132a", panel="#171a34", success=OK, warning=WARN, error=DANGER, dark=True)
+# Kestrel's Dusk (serve/web/kestrel.css, dark); EDGE: the outer boxes, a step brighter than its card lines.  Every
+# colour that carries text reads at 4.5:1 or better on BG (FAINT too: the key hints), and each element is one colour
+# (no gradients: a terminal without 24-bit colour rounds a gradient into bands)
+BG, SURFACE3, LINE, EDGE = "#081322", "#23395a", "#203553", "#2b4366"
+INK, INK_SOFT, MUTED, FAINT = "#eaf0f8", "#c3cedd", "#8fa0b8", "#7d8ea8"
+ACCENT, ACCENT2, ACCENT_TEXT, INFO_TEXT = "#ff8a3d", "#5ea8ff", "#ffb27a", "#9cc8ff"
+OK, OK_TEXT, WARN, DANGER, TINT = "#4ade80", "#86efac", "#fbbf24", "#fb7185", "#2b2426"   # TINT: --st-accent-tint
+THEME = Theme(name="kestrel", primary=ACCENT, secondary=ACCENT2, accent=ACCENT, foreground=INK, background=BG,
+              surface="#12243d", panel="#1a2f4d", success=OK, warning=WARN, error=DANGER, dark=True)
 # "maya." in font8x8 (public domain: the IBM PC BIOS font), 2 x 2 of its pixels to a character cell, as binsider's
 FONT = {"m": (0x00, 0x00, 0x33, 0x7F, 0x7F, 0x6B, 0x63, 0x00), "a": (0x00, 0x00, 0x1E, 0x30, 0x3E, 0x33, 0x6E, 0x00),
         "y": (0x00, 0x00, 0x33, 0x33, 0x33, 0x3E, 0x30, 0x1F), ".": (0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x00)}
@@ -46,8 +48,9 @@ def mix(a: str, b: str, t: float) -> str:
 
 
 def gradient(s: str, style: str = "") -> Text:
-    """`s` in the dashboard's brand gradient (violet to sky, as its VRAM tier bar), column by column."""
-    return Text.assemble(*((ch, f"{style} {mix(ACCENT, ACCENT2, i / max(1, len(s) - 1))}") for i, ch in enumerate(s)))
+    """`s` in the brand colour: one colour, not a gradient per column (a terminal without 24-bit colour rounded the
+    gradient into bands of the nearest of its 256 colours)."""
+    return Text(s, f"{style} {ACCENT}")
 
 
 def bar(frac: float, width: int = 24) -> Text:
@@ -71,9 +74,10 @@ def hints(*keys) -> Text:
 
 def splash(model: str | None = None) -> Text:
     """The logo and the line under it, which names the model once the setup knows it (its first question)."""
+    # (a badge of plain letters, not big() pixel art: quarter-block characters break apart in many terminal fonts)
     tagline = Text.assemble((f"Set up {model or 'your model'} ", INK), ("on your own GPUs.", f"italic {ACCENT_TEXT}"))
-    lines = [gradient(row, "bold") for row in big("maya.")] + [
-        tagline, Text("─" * tagline.cell_len, LINE), Text("https://github.com/mw00/project-maya", f"italic {INK_SOFT}")]
+    lines = [Text("\u00a0KESTREL\u00a0", f"bold {BG} on {ACCENT}"), Text("big models on one desktop", MUTED), Text(""),
+             tagline, Text("─" * tagline.cell_len, LINE)]
     return Text("\n", justify="center").join(lines)
 
 
@@ -146,9 +150,9 @@ def setup_card(app, spin: str) -> Text:
     """The card while the setup runs (setup_tui.SetupApp): its step, what runs now, the progress - or, for a
     start without a setup, what runs before Maya does (a compile after an update)."""
     n = app.cur
-    name = app.titles.get(n, "Starting" if app.steps else "Starting Maya")
+    name = app.titles.get(n, "Starting" if app.steps else "Starting Kestrel")
     if app.pending is not None:
-        stopped = "Maya stopped" if app.serving is not None else "The setup stopped"
+        stopped = "Kestrel stopped" if app.serving is not None else "The setup stopped"
         now = Text(f"{stopped} (below)", f"bold {DANGER}") if app.pending[2] == "fail" else \
             Text("Waiting for your answer (below)", f"bold {WARN}")
     else:
@@ -239,11 +243,11 @@ class StopScreen(ModalScreen):
             yield Static(Text(f"The dashboard and the API close, and the model leaves the GPUs. {self.me} starts it "
                               "again." if self.serving else f"Everything finished so far is kept: {self.me} continues "
                               "where it stopped. The command running now ends.", INK_SOFT))
-            yield OptionList(*(("Keep running", "Stop Maya") if self.serving else ("Keep going", "Stop the setup")))
+            yield OptionList(*(("Keep running", "Stop Kestrel") if self.serving else ("Keep going", "Stop the setup")))
 
     def on_mount(self) -> None:
         box = self.query_one("#box")
-        box.border_title = title("Stop Maya?" if self.serving else "Stop the setup?")
+        box.border_title = title("Stop Kestrel?" if self.serving else "Stop the setup?")
         box.border_subtitle = hints(("Enter", "Choose"), ("Esc", "Back"))
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:

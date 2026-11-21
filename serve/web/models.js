@@ -88,14 +88,14 @@ async function watchRestart(r) {
     } catch (e) { h = null; }
     if (!h) { down = true; continue; }
     if (down && h.status === "ok") {                   // back: the page starts over with the model that runs now
-      toast("success", r.why === "switch" ? `${r.name} is running` : "Maya is back", "Reloading the page…", 3000);
+      toast("success", r.why === "switch" ? `${r.name} is running` : "Kestrel is back", "Reloading the page…", 3000);
       setTimeout(() => location.reload(), 900);
       return;
     }
   }
   MS.restart = null;
   emit();
-  toast("error", "Maya is not back yet", "The terminal it runs in shows why. This page reconnects when it is.", 30000);
+  toast("error", "Kestrel is not back yet", "The terminal it runs in shows why. This page reconnects when it is.", 30000);
 }
 
 async function switchTo(m) {
@@ -103,20 +103,20 @@ async function switchTo(m) {
   const restarts = MS.data.restarts;
   const ok = await confirmDialog(`Switch to ${titleOf(m)}?`,
     (restarts
-      ? `<p>Maya stops <b>${esc(run ? titleOf(run) : "the model running now")}</b> and loads <b>${esc(titleOf(m))}</b> from ` +
+      ? `<p>Kestrel stops <b>${esc(run ? titleOf(run) : "the model running now")}</b> and loads <b>${esc(titleOf(m))}</b> from ` +
         `<code>${esc(m.file)}</code>. That takes a few minutes.</p><ul>` +
         `<li>Your chats stay here. The chat settings start at ${esc(titleOf(m))}'s own standard parameters and thinking ` +
         "level: a model's are not another's.</li>" +
         `<li>Apps using the API get a “try again” until it is back, then the model name <code>${esc(m.model)}</code>.</li>` +
         (S.busy ? "<li>The answer being written finishes first.</li>" : "") + "</ul>"
-      : `<p><b>${esc(titleOf(m))}</b> becomes the model Maya starts next. This server was not started by maya.sh or ` +
-        "START-MAYA.bat, so it cannot start again by itself: stop it and start Maya again.</p>"),
+      : `<p><b>${esc(titleOf(m))}</b> becomes the model Kestrel starts next. This server was not started by maya.sh or ` +
+        "START-MAYA.bat, so it cannot start again by itself: stop it and start Kestrel again.</p>"),
     restarts ? "Switch model" : "Start it next");
   if (!ok) return;
   try {
     const out = await api("api/models/switch", {method: "POST", body: {file: m.file}});
     if (!out.restarts) {
-      toast("success", "Saved as the next model", `${titleOf(m)} starts the next time Maya starts (./maya.sh or START-MAYA.bat).`, 8000);
+      toast("success", "Saved as the next model", `${titleOf(m)} starts the next time Kestrel starts (./maya.sh or START-MAYA.bat).`, 8000);
       loadModels();
       return;
     }
@@ -234,7 +234,7 @@ async function saveSettings(m) {
   // the running model's, where Maya starts again by itself: the reload is said and confirmed first, as a switch is
   if (m.running && MS.data.restarts) {
     const ok = await confirmDialog(`Restart ${titleOf(m)} with these engine settings?`,
-      `<p>Maya saves them into <code>${esc(m.file)}</code> and loads the model again with them. That takes a few minutes.</p>` +
+      `<p>Kestrel saves them into <code>${esc(m.file)}</code> and loads the model again with them. That takes a few minutes.</p>` +
       "<ul><li>Your chats stay here; the next answer reads the chat again.</li>" +
       "<li>Apps using the API get a “try again” until it is back.</li>" +
       (S.busy ? "<li>The answer being written finishes first.</li>" : "") + "</ul>", "Save and restart");
@@ -248,7 +248,7 @@ async function saveSettings(m) {
     closeSheet();
     if (out.restarts) { watchRestart({why: "settings", file: m.file, name: titleOf(m)}); return; }
     toast("success", "Engine settings saved", m.running
-      ? `Saved into ${m.file}. They apply from Maya's next start (./maya.sh or START-MAYA.bat starts it again by itself).`
+      ? `Saved into ${m.file}. They apply from Kestrel's next start (./maya.sh or START-MAYA.bat starts it again by itself).`
       : `Saved into ${m.file}. ${titleOf(m)} starts with them when you switch to it.`, 8000);
     loadModels();
   } catch (e) {
@@ -327,7 +327,7 @@ function contextRow(m, d, ch, cost, keys = [], extra = null, note = null) {
 // on the first tab, only where the model has a direction file and an engine for it (or a default left on from
 // earlier, so it can be switched off) - no switch otherwise
 function withAblate(tabs, m, d) {
-  const c = (m.choices && m.choices.ablate) || {available: false, why: "this Maya has no refusal ablation"};
+  const c = (m.choices && m.choices.ablate) || {available: false, why: "this Kestrel has no refusal ablation"};
   if (!c.available && !d.ablate && !(m.settings && m.settings.ablate)) return tabs;
   const row = html`<${Row} label="Refusal ablation" flag="--ablate" changed=${!same(d.ablate, m.settings.ablate)}
     hint=${c.available ? "The default for chats and apps that do not choose: projects the model's refusal direction out of its answers. Takes effect at once, no restart."
@@ -669,7 +669,7 @@ function Editor({m}) {
                 onClick=${() => setEnv(rows.filter((_, j) => j !== i))}><${Icon} name="close" sm/></button></div>`)}
             <button type="button" class="btn btn--ghost btn--sm mdl-link" onClick=${() => setEnv([...rows, ["", ""]])}><${Icon} name="plus" sm/>Add a variable</button></div>`}/>
         <div class="mdl-field mdl-field--last"><span class="mdl-field__text"><span class="mdl-field__name"><span>The engine's command</span></span>
-          <span class="mdl-field__hint">What Maya runs from this config, changes in purple. A setup run again keeps these settings.</span></span>
+          <span class="mdl-field__hint">What Kestrel runs from this config, changes in purple. A setup run again keeps these settings.</span></span>
           <${Command} c=${MS.preview} saved=${m.command}/></div>`
       : tabs[tab].rows}
     </div>
@@ -677,8 +677,8 @@ function Editor({m}) {
     ${changed.length ? html`<p class="mdl-note">${ctxOnly
       ? `The model reloads with a ${ctxfmt(sent.context)} context in place (a few minutes), as Settings › Chat defaults does; ${m.file} keeps it for the next start too.`
       : restarts
-      ? `Maya starts again with these settings after the answer being written; the model loads again (a few minutes). The settings before stay in ${m.file}.prev.`
-      : m.running ? `Saved into ${m.file}; they apply from Maya's next start (this server was not started by maya.sh or START-MAYA.bat).`
+      ? `Kestrel starts again with these settings after the answer being written; the model loads again (a few minutes). The settings before stay in ${m.file}.prev.`
+      : m.running ? `Saved into ${m.file}; they apply from Kestrel's next start (this server was not started by maya.sh or START-MAYA.bat).`
       : `Saved into ${m.file}; ${titleOf(m)} starts with them when you switch to it.`}</p>` : null}
     <div class="mdl-edit__foot">
       <span class=${`mdl-count${changed.length ? " is-on" : ""}`}>${changed.length ? `${changed.length} change${changed.length === 1 ? "" : "s"}` : "No changes"}</span>
@@ -707,9 +707,9 @@ const startable = () => (MS.data ? MS.data.models.filter((x) => !x.running && x.
 // why a model's Delete is off, said beside it (null: it can be deleted). The running one: only by switching to another
 // model first (Maya deletes it at the next start, once nothing runs from it); never while it is loaded.
 function deleteBlock(m) {
-  if (MS.restart) return "Maya is starting again: delete when it is back.";
+  if (MS.restart) return "Kestrel is starting again: delete when it is back.";
   if (!m.running) return null;
-  if (!MS.data.restarts) return "It is the model running now. This server cannot switch by itself: start Maya with another model, then delete this one.";
+  if (!MS.data.restarts) return "It is the model running now. This server cannot switch by itself: start Kestrel with another model, then delete this one.";
   if (!startable().length) return "It is the model running now, and no other model here can start instead: set up another one first.";
   return null;
 }
@@ -769,7 +769,7 @@ async function deleteModel() {
 function filesSaid(p) {
   const parts = [];
   if (p.gguf) parts.push(p.gguf === 1 ? "its GGUF file" : `its ${p.gguf} GGUF files`);
-  if (p.pack) parts.push(p.gguf ? "the pack Maya built from them" : "the pack Maya built");
+  if (p.pack) parts.push(p.gguf ? "the pack Kestrel built from them" : "the pack Kestrel built");
   if (p.vision) parts.push("its image encoder");
   if (p.drafter != null) parts.push(`its DFlash2 drafter (${bytes(p.drafter)})`);
   const s = and(parts);
@@ -777,7 +777,7 @@ function filesSaid(p) {
 }
 
 // what deleting it deletes (each folder or file, its size) and what stays because another model uses it
-const GOES = {folder: "Its folder", pack: "The pack Maya built", gguf: "A model file", vision: "Its image encoder", drafter: "Its DFlash2 drafter"};
+const GOES = {folder: "Its folder", pack: "The pack Kestrel built", gguf: "A model file", vision: "Its image encoder", drafter: "Its DFlash2 drafter"};
 const STAYS = {folder: "The folder", pack: "The pack", vision: "The image encoder", drafter: "The DFlash2 drafter"};
 const baseName = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
 function PlanList({p}) {
@@ -819,9 +819,9 @@ function DeleteDialog() {
       <div class="dialog__head"><h2 id="mdl-del-title">Delete ${titleOf(m)}?</h2>
         <button type="button" class="icon-btn dialog__close" aria-label="Close" onClick=${closeDelete}><${Icon} name="close"/></button></div>
       <div class="dialog__body">
-        <p>Maya takes it off this list: its config <code>${m.file}</code>${m.script ? html` and its start script <code>${m.script}</code>` : null}. Your chats stay.</p>
+        <p>Kestrel takes it off this list: its config <code>${m.file}</code>${m.script ? html` and its start script <code>${m.script}</code>` : null}. Your chats stay.</p>
         ${m.running ? html`<div class="mdl-del__to" role="radiogroup" aria-labelledby="mdl-del-to">
-          <p id="mdl-del-to">It is running now, so it is not deleted while it is loaded: Maya switches to another model first (a few minutes), then deletes it:</p>
+          <p id="mdl-del-to">It is running now, so it is not deleted while it is loaded: Kestrel switches to another model first (a few minutes), then deletes it:</p>
           ${to.map((x) => html`<button type="button" role="radio" aria-checked=${String(d.then === x.file)} key=${x.file} disabled=${d.busy}
             class=${`mdl-del__box mdl-del__box--radio${d.then === x.file ? " is-on" : ""}`} onClick=${() => { d.then = x.file; emit(); }}>
             <span class="mdl-del__check" aria-hidden="true"></span>
@@ -1001,10 +1001,10 @@ function Download() {
 
 // ------------------------------------------------------------------ files no model uses (POST /api/models/leftovers)
 async function deleteLeftover(x) {
-  const what = [x.pack ? "a pack Maya built" : null, x.hub ? "a download from Hugging Face" : null].filter(Boolean);
+  const what = [x.pack ? "a pack Kestrel built" : null, x.hub ? "a download from Hugging Face" : null].filter(Boolean);
   const ok = await confirmDialog(`Delete ${x.name}?`,
-    `<p>Maya deletes ${x.folder ? "this folder and everything in it" : "this file"}: <b>${esc(bytes(x.bytes))}</b> at ` +
-    `<code>${esc(x.path)}</code>.</p><p>${what.length ? `It holds ${esc(and(what))}. ` : "Maya's setup may not have made it. "}` +
+    `<p>Kestrel deletes ${x.folder ? "this folder and everything in it" : "this file"}: <b>${esc(bytes(x.bytes))}</b> at ` +
+    `<code>${esc(x.path)}</code>.</p><p>${what.length ? `It holds ${esc(and(what))}. ` : "Kestrel's setup may not have made it. "}` +
     "No model on this list runs from it. This cannot be undone.</p>", `Delete ${bytes(x.bytes)}`, true);
   if (!ok) return;
   try {
@@ -1021,10 +1021,10 @@ function Leftovers({L}) {
   return html`<section class="card mdl-left" id="mdl-left" tabIndex="-1" aria-labelledby="mdl-left-title">
     <div class="mdl-left__head"><b id="mdl-left-title">Files no model uses</b><b class="mdl-del__size">${bytes(L.bytes)}</b></div>
     <span class="mdl-left__sub">In ${and(L.folders)}, and no model on this list runs from them: a model deleted by hand, or set up
-      again somewhere else. Maya may not have downloaded all of them, so look before you delete.</span>
+      again somewhere else. Kestrel may not have downloaded all of them, so look before you delete.</span>
     <ul class="mdl-left__list">${L.items.map((x) => html`<li key=${x.path}>
       <span class="mdl-left__text"><span class="mdl-left__name"><${Icon} name=${x.folder ? "folder" : "disk"} sm/><b>${x.name}</b>
-        ${x.pack ? html`<span class="mdl-badge">Maya pack</span>` : null}${x.hub ? html`<span class="mdl-badge">Hugging Face</span>` : null}</span>
+        ${x.pack ? html`<span class="mdl-badge">Kestrel pack</span>` : null}${x.hub ? html`<span class="mdl-badge">Hugging Face</span>` : null}</span>
         <code>${x.path}</code><span>${bytes(x.bytes)} · changed ${relTime(x.modified * 1000)}</span></span>
       <button type="button" class="btn btn--ghost btn--sm" aria-label=${`Delete ${x.name}`} disabled=${!!MS.restart}
         onClick=${() => deleteLeftover(x)}><${Icon} name="trash" sm/>Delete</button></li>`)}</ul>
@@ -1093,7 +1093,7 @@ export function ModelsPage() {
         <button type="button" class="icon-btn" aria-label="New chat" title="New chat" onClick=${newChat}><${Icon} name="new-chat"/></button></div></header>` : null}
     <div class="mon__scroll"><div class="mon__page mdl__page">
       <div class="mon__head">
-        <div><h1>Models</h1><p>The models set up on this machine. Maya runs one at a time.</p></div>
+        <div><h1>Models</h1><p>The models set up on this machine. Kestrel runs one at a time.</p></div>
         <div class="mon__acts"><button type="button" class=${`btn btn--secondary btn--sm${MS.add ? " is-on" : ""}`} aria-expanded=${String(MS.add)}
           onClick=${() => { MS.add = !MS.add; emit(); if (MS.add) loadCatalog(); }}><${Icon} name="plus" sm/>Add a model</button></div>
       </div>
@@ -1106,7 +1106,7 @@ export function ModelsPage() {
       </section>` : null}
       ${r ? html`<div class="callout callout--info" role="status"><${Icon} name="info" sm/><span>
           <b>${r.why === "switch" ? `Switching to ${r.name}.` : `Restarting ${r.name} with the new engine settings.`}</b>
-          ${" "}Maya finishes the answer it is writing, then loads the model (a few minutes). This page reloads when it is back.</span></div>` : null}
+          ${" "}Kestrel finishes the answer it is writing, then loads the model (a few minutes). This page reloads when it is back.</span></div>` : null}
       ${MS.gone ? html`<div class="callout callout--ok" role="status"><${Icon} name="check" sm/><span>
           <b>${MS.gone.name} is deleted.</b>${" "}${MS.gone.files ? `${bytes(MS.gone.freed)} freed on the disk.`
             : MS.gone.folder ? `Its files stay in ${MS.gone.folder}.` : ""}${MS.gone.users.length
@@ -1118,8 +1118,8 @@ export function ModelsPage() {
         : D.models.map((m) => html`<${Card} m=${m} key=${m.file}/>`)}
       ${D ? html`<${Leftovers} L=${D.leftovers}/>` : null}
       ${D && D.models.length ? html`<p class="mdl-foot"><${Icon} name="info" sm/><span>${D.restarts
-        ? "Switching, or saving the running model's engine settings, starts Maya again through its start script, as a port change does. Each model keeps its own chat settings."
-        : "This server was not started by maya.sh or START-MAYA.bat, so it cannot start again by itself: a switch or new settings apply from Maya's next start."}</span></p>` : null}
+        ? "Switching, or saving the running model's engine settings, starts Kestrel again through its start script, as a port change does. Each model keeps its own chat settings."
+        : "This server was not started by maya.sh or START-MAYA.bat, so it cannot start again by itself: a switch or new settings apply from Kestrel's next start."}</span></p>` : null}
     </div></div>
     ${MS.sheet ? html`<${Sheet} key=${MS.sheet.file}/>` : null}
     ${MS.del ? html`<${DeleteDialog} key=${MS.del.m.file}/>` : null}

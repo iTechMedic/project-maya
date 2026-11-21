@@ -141,7 +141,7 @@ HF = "https://huggingface.co/{repo}/resolve/{revision}/{path}"
 # it names them, else the model's own repo.
 MODELS = {
     "Maya-S-v2-IQ2_XXS": {
-        "about": "Maya-S, Project Maya's compact quant: error-feedback-rounded IQ2_XXS gate/up experts, "
+        "about": "Maya-S, the compact quant: error-feedback-rounded IQ2_XXS gate/up experts, "
                  "IQ2_S/IQ3_XXS down projections, Q6_K attention, the MTP draft block, made from Z.ai's FP8 release",
         "repo": "peasantsmith/GLM-5.3-Flash-Maya-GGUF", "revision": "main", "folder": "Maya-S-v2-IQ2_XXS",
         "file": "GLM-5.3-Flash-Maya-S-v2-IQ2_XXS-{i:05d}-of-{n:05d}.gguf", "shards": 3, "download_gb": 96.5,
@@ -184,7 +184,7 @@ MODELS = {
                        "GLM-5.3-Flash-vocab.gguf":
                            "8f53cb1bd2e631c14ef413e3284735d9e53f3c508d07a6f609e705b487105912"}}},
     "Maya-XS-IQ1_S": {
-        "about": "Maya-XS, Project Maya's smallest GLM quant: about 73 GB, for PCs with 64 GB of RAM and a 24 GB "
+        "about": "Maya-XS, the smallest GLM quant: about 73 GB, for PCs with 64 GB of RAM and a 24 GB "
                  "card at 128K context (KV cache in int8; thinking budget 8192)",
         "repo": "peasantsmith/GLM-5.3-Flash-Maya-GGUF", "revision": "6728cf78a5b198a6a6f84b7fb88956a17ec56521",
         "folder": "Maya-XS", "file": "GLM-5.3-Flash-Maya-XS-IQ1_S-{i:05d}-of-{n:05d}.gguf", "shards": 2,
@@ -201,7 +201,7 @@ MODELS = {
                        "GLM-5.3-Flash-vocab.gguf":
                            "8f53cb1bd2e631c14ef413e3284735d9e53f3c508d07a6f609e705b487105912"}}},
     "Maya-M": {
-        "about": "Maya-M, Project Maya's larger quant: error-feedback-rounded IQ2_S gate/up experts, IQ3_XXS down "
+        "about": "Maya-M, the larger quant: error-feedback-rounded IQ2_S gate/up experts, IQ3_XXS down "
                  "projections (IQ3_S in the most sensitive layers), Q6_K attention, the MTP draft block, made from "
                  "Z.ai's FP8 release",
         "repo": "peasantsmith/GLM-5.3-Flash-Maya-GGUF", "revision": "main", "folder": "Maya-M",
@@ -245,7 +245,7 @@ MODELS = {
                        "GLM-5.3-Flash-vocab.gguf":
                            "8f53cb1bd2e631c14ef413e3284735d9e53f3c508d07a6f609e705b487105912"}}},
     "Maya-L": {
-        "about": "Maya-L, Project Maya's largest quant: error-feedback-rounded IQ3_S gate/up experts, IQ4_XS down "
+        "about": "Maya-L, the largest quant: error-feedback-rounded IQ3_S gate/up experts, IQ4_XS down "
                  "projections (Q5_K in the most sensitive layers), Q6_K attention, the MTP draft block, made from "
                  "Z.ai's FP8 release",
         "repo": "peasantsmith/GLM-5.3-Flash-Maya-GGUF", "revision": "main", "folder": "Maya-L",
@@ -556,7 +556,7 @@ MODELS_BY_HAND = ("EXL3-sc_4.10bpw",)
 # measurement leaves out of its own 15.7)
 G53_MODELS = {
     "GLM-5.3-Maya-XS": {
-        "about": "Maya-XS, Project Maya's own GLM-5.3 quant (744B, 40B active a token; the routed experts in ~1.6 "
+        "about": "Maya-XS, a GLM-5.3 quant (744B, 40B active a token; the routed experts in ~1.6 "
                  "bits), text only, drafting with its own NextN block",
         "repo": "peasantsmith/GLM-5.3-Maya-GGUF", "revision": "2fb34fe0d9398f33782b6ece7dca1bb798f8b168",
         "folder": "Maya-XS", "file": "GLM-5.3-Maya-XS-{i:05d}-of-{n:05d}.gguf", "shards": 4, "download_gb": 170.0,
@@ -1434,7 +1434,7 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
     if unvalidated:
         warn(f"{', '.join(unvalidated)} (RDNA 2) is experimental: it builds and has the portable kernels, but Maya has "
              "not been validated on such a card yet - please report how it goes in an issue "
-             "(https://github.com/mw00/project-maya/issues)")
+             "(https://github.com/iTechMedic/project-maya/issues)")
     select_build_backend("hip")
     return {"backend": "hip", "gpus": chosen, "archs": sorted({g["arch"] for g in chosen}), "rocm": str(root),
             **({"rocm_bin": str(bindir)} if WIN else {})}
@@ -1649,7 +1649,7 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
              "does not have",
              f"set up one of Maya's GGUF quants instead: {ME} --setup --model deepseek-maya-s (or deepseek-maya-xs)")
     if not (WIN or sys.platform.startswith("linux")):
-        fail("Project Maya runs on Linux and Windows (and on Apple Silicon: --backend metal)",
+        fail("Kestrel runs on Linux and Windows (and on Apple Silicon: --backend metal)",
              "the engine needs an NVIDIA GPU and CUDA")
     min_cc = ((DS4_GGUF_MIN_CC if gguf else DS4_MIN_CC) if ds4 else (MM3_GGUF_MIN_CC if gguf else mm3_min_cc()) if mm3
               else QWEN_MIN_CC if family == "qwen" else HY4_MIN_CC if hy4 else MIN_CC)
@@ -1984,7 +1984,7 @@ def choose_family(a, prev: dict) -> str:
         have = None
     here = f" (this PC: {have:.0f} GB)" if have else ""
     rows = [("GLM-5.3-Flash", None,
-             "Z.ai's GLM-5.3-Flash in Project Maya's GGUF quants (GLM-5.3-Flash-Maya-S to -Maya-L, 95-156 GB) or "
+             "Z.ai's GLM-5.3-Flash in the GGUF quants (GLM-5.3-Flash-Maya-S to -Maya-L, 95-156 GB) or "
              "turboderp's EXL3 quants: from one GPU up, the experts that do not fit in VRAM from RAM and the SSD; "
              "NVIDIA and AMD; pictures with its vision encoder."),
             (G53.LABEL, None,
@@ -4249,11 +4249,11 @@ def write_run_script(cfg_path: Path, port: int) -> Path:
     cmd = [sys.executable, str(HERE / "maya.py"), "--config", str(cfg_path), "--port", str(port)]
     if WIN:
         script = ROOT / f"run-{cfg_path.stem}.bat"
-        script.write_text(f'@echo off\r\nrem starts the Project Maya dashboard and API (written by maya.py; {ME} does '
+        script.write_text(f'@echo off\r\nrem starts the Kestrel dashboard and API (written by maya.py; {ME} does '
                           f'the same)\r\ncd /d "{ROOT}" || exit /b 1\r\n{cmdline(cmd)} %*\r\n', encoding="utf-8")
         return script
     script = ROOT / f"run-{cfg_path.stem}.sh"
-    script.write_text("#!/bin/sh\n# starts the Project Maya dashboard and API (written by maya.py; ./maya.sh does the "
+    script.write_text("#!/bin/sh\n# starts the Kestrel dashboard and API (written by maya.py; ./maya.sh does the "
                       "same)\ncd " + shlex.quote(str(ROOT)) + " || exit 1\nexec " + shlex.join(cmd) + ' "$@"\n',
                       encoding="utf-8")
     script.chmod(0o755)
@@ -6011,7 +6011,7 @@ def start(cfg_path: Path, a) -> int:
     dashboard - the Monitor's numbers from the engine - and its log), else in the terminal as it prints."""
     if setup_screen(a, asks=False):
         import setup_tui
-        rc = setup_tui.run(lambda: serve_on_screen(cfg_path, a), maya_version(), None, ME, steps=False)
+        rc = setup_tui.run(lambda: serve_on_screen(cfg_path, a), kestrel_version(), None, ME, steps=False)
         return after_server(rc, a)
     cmd, env, _ = server_command(cfg_path, a)
     return after_server(run_server(cmd, env=env), a)
@@ -6493,7 +6493,7 @@ def bench(cfg_path: Path, version: str) -> int:
     gpus = ", ".join(f"{g['name']} {g['vram_gb']:.0f} GB" for g in found) or (
         "the Apple GPU (Metal)" if cfg.get("backend") == "metal" else "?")
     total, _ = mem_gb()
-    lines = [f"Project Maya v{version} benchmark, {time.strftime('%Y-%m-%d %H:%M')}",
+    lines = [f"Kestrel {kestrel_version()} (build {version}) benchmark, {time.strftime('%Y-%m-%d %H:%M')}",
              f"GPUs: {gpus}; RAM {total:.0f} GB; CPU {S.cpu_info()[0]}",
              f"setup: {cfg_path.name}, context {ctx}, GPUs {cfg.get('gpu')}",
              f"decode (writing the answer): mean {mean:.1f} tokens/s over {n_mean} answers of up to 256 tokens "
@@ -10397,6 +10397,12 @@ def maya_version() -> str:
     return (HERE / "VERSION").read_text(encoding="utf-8").strip() if (HERE / "VERSION").exists() else "?"
 
 
+def kestrel_version() -> str:
+    """Kestrel's own release (KESTREL_VERSION); maya_version() stays upstream's, shown as the build."""
+    f = HERE / "KESTREL_VERSION"
+    return f.read_text(encoding="utf-8").strip() if f.exists() else "?"
+
+
 def model_option(a) -> str | None:
     """--model as typed -> what the setup reads (in place): a.model a GLM download (a MODELS key), DS4 or MM3, and a
     DeepSeek / MiniMax / Hy4-Flash quant's files as --ds4-quant / --mm3-quant / --hy4-quant.  It takes a setup id (glm-maya-s, deepseek-maya-xs,
@@ -10609,7 +10615,7 @@ def main() -> int:
         sys.stdout.flush()
         os.execve("/bin/sh", ["/bin/sh", str(HERE / "maya.sh"), *sys.argv[1:]], dict(os.environ, MAYA_SH="1"))
     version = maya_version()
-    say(f"Project Maya v{version} - GLM-5.3-Flash, {DS4}, {MM3} or {HY4} on your own GPU(s).")
+    say(f"Kestrel {kestrel_version()} (build {version}) - big models on one desktop: GLM-5.3-Flash, {DS4}, {MM3} or {HY4} on your own GPU(s).")
     if a.report:
         return report(version, a.backend, a.config)
     if a.import_model:
@@ -10716,7 +10722,7 @@ def main() -> int:
     rc = None                                          # the server's exit code, when it ran on the setup's screen
     if setup_screen(a):
         import setup_tui
-        cfg_path, rc = setup_tui.run(lambda: set_up_and_serve(a, prev), version, ROOT / "maya-setup.log",
+        cfg_path, rc = setup_tui.run(lambda: set_up_and_serve(a, prev), kestrel_version(), ROOT / "maya-setup.log",
                                      ME) or (None, None)
     else:
         cfg_path = set_up(a, prev)

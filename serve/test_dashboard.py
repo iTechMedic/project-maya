@@ -214,7 +214,7 @@ class Dashboard(unittest.TestCase):
         s, h, b = self.req("GET", "/api/report")
         text = b.decode()
         self.assertEqual(s, 200)
-        self.assertIn("Project Maya", text)
+        self.assertIn("Kestrel", text)
         self.assertIn("MAYA_GLM_RAM_GB", text)   # (a config's settings under the names users see)
         self.assertNotIn("secret", text)
 

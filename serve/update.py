@@ -1,8 +1,12 @@
-"""The dashboard's About > Updates: is a newer Project Maya release out, and updating this folder to it.
+"""The dashboard's About > Updates: is a newer Kestrel release out, and updating this folder to it.
 
-The check asks GitHub for the latest release of the repository this folder was cloned from (git's origin; else
-mw00/project-maya) - only when the dashboard asks, at most every six hours (MAYA_UPDATE_CHECK=0 turns it off).
-Updating fast-forwards the git checkout to that release's tag, then the server ends with UPDATE_EXIT: maya.sh /
+The check asks GitHub for the latest release of Kestrel's repository (KESTREL_REPO; a fork of Kestrel cloned from
+GitHub checks its own origin instead, but never upstream's: a folder whose origin is still upstream's, as an install
+updated by hand from both, checks Kestrel's) - only when the dashboard asks, at most every six hours
+(MAYA_UPDATE_CHECK=0 turns it off).  Kestrel's releases are tagged kestrel-vX.Y.Z and its own version is the
+KESTREL_VERSION file (VERSION stays upstream's release, shown as the build).
+Updating fetches that one tag from the same repository, fast-forwards the git checkout to it, then the server ends
+with UPDATE_EXIT: maya.sh /
 START-MAYA.bat (maya.py) start Maya again, which compiles what changed in the engine and loads the model.  A folder
 that can't do that (no git, local changes, a server started some other way) gets the reason and the steps by hand."""
 import json
@@ -11,17 +15,21 @@ import re
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = "mw00/project-maya"
+KESTREL_REPO = "iTechMedic/project-maya"   # Kestrel's GitHub repository: its releases (change it here when it is renamed)
+UPSTREAM_REPOS = {"mw00/project-maya"}     # the project Kestrel forked: never asked for Kestrel's releases
+REPO = KESTREL_REPO
+ISSUES = f"github.com/{KESTREL_REPO}/issues"
 UPDATE_EXIT = 75                    # the server's exit code that tells maya.py: updated, start again (EX_TEMPFAIL)
 RESTART_EXIT = 76                   # ... the dashboard saved a new port: start again with the saved config
 SUPERVISED = "MAYA_RESTART_ON_UPDATE"   # set by maya.py for the server it starts: it starts it again after an update
 CHECK_EVERY = 6 * 3600
 RETRY_AFTER = 10 * 60               # GitHub not reached: ask again after this
-TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+TAG = re.compile(r"^(?:kestrel-)?v?(\d+)\.(\d+)\.(\d+)$")   # (kestrel-v0.1.0; v0.1.0 and 0.1.0 read too)
 
 
 def vtuple(v):
@@ -47,6 +55,12 @@ def origin_repo(root=ROOT) -> str:
         return REPO
     m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", r.stdout.strip())
     return m.group(1) if r.returncode == 0 and m else REPO
+
+
+def release_repo(root=ROOT) -> str:
+    """Where this folder's releases come from: its origin on GitHub, unless that is upstream's (then Kestrel's)."""
+    repo = origin_repo(root) if (Path(root) / ".git").exists() else REPO
+    return REPO if repo.lower() in UPSTREAM_REPOS else repo
 
 
 def summary(notes: str) -> str:
@@ -82,20 +96,29 @@ class Updater:
         return self.info()
 
     def _fetch_latest(self):
-        repo = origin_repo(self.root) if (self.root / ".git").exists() else REPO
+        repo = release_repo(self.root)
         req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/latest",
                                      headers={"Accept": "application/vnd.github+json",
-                                              "User-Agent": f"project-maya/{self.current or '?'}"})
+                                              "User-Agent": f"kestrel/{self.current or '?'}"})
         try:
             with urllib.request.urlopen(req, timeout=8) as r:
                 rel = json.loads(r.read().decode("utf-8"))
             tag = str(rel.get("tag_name") or "")
             if not vtuple(tag):
                 raise ValueError(f"the latest release's tag is not a version ({tag[:40]!r})")
-            self.latest = {"version": tag.lstrip("v"), "tag": tag, "url": rel.get("html_url"),
+            self.latest = {"version": ".".join(map(str, vtuple(tag))), "tag": tag, "url": rel.get("html_url"),
                            "summary": summary(rel.get("body") or ""), "published": rel.get("published_at"),
-                           "repo": repo}
+                           "repo": repo, "fetch": f"https://github.com/{repo}.git"}
             self.error = None
+            self.checked = time.time()
+            self.next_check = self.checked + CHECK_EVERY
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                self.error = f"GitHub could not be reached ({e.reason or e})"
+                self.next_check = time.time() + RETRY_AFTER
+                return
+            # (404: the repository has no release yet - nothing newer, nothing wrong; ask again at the usual pace)
+            self.latest, self.error = None, None
             self.checked = time.time()
             self.next_check = self.checked + CHECK_EVERY
         except (OSError, ValueError) as e:              # offline, GitHub's rate limit, a proxy: say so, ask later
@@ -130,7 +153,7 @@ class Updater:
         return {"current": self.current, "enabled": self.enabled(), "latest": self.latest, "newer": newer,
                 "checked": self.checked or None, "error": self.error, "can_update": newer and why is None,
                 "blocker": why, "state": state,
-                "by_hand": ("git pull, then start Maya again (./setup.sh or START-MAYA.bat)" if (self.root / ".git").exists()
+                "by_hand": ("git pull, then start Kestrel again (./setup.sh or START-MAYA.bat)" if (self.root / ".git").exists()
                             else "download the new release from GitHub into a new folder")}
 
     def busy(self) -> bool:
@@ -144,21 +167,24 @@ class Updater:
                 raise ValueError("this is the latest version")
             why = self.blocker()
             if why:
-                raise ValueError(f"Maya can't update itself here: {why}")
+                raise ValueError(f"Kestrel can't update itself here: {why}")
             if self.busy():
                 raise ValueError("an update is already running")
             self.state = {"state": "updating", "to": self.latest["version"], "started": time.time(), "error": None}
-            self.thread = threading.Thread(target=self._update, args=(svc, self.latest["tag"]), daemon=True)
+            self.thread = threading.Thread(target=self._update, args=(svc, self.latest["tag"],
+                                                                     self.latest.get("fetch") or "origin"), daemon=True)
             self.thread.start()
             return dict(self.state)
 
-    def _update(self, svc, tag: str):
+    def _update(self, svc, tag: str, src: str = "origin"):
+        """Fetch the release's tag alone from `src` (the repository the check asked: Kestrel's, whatever this folder's
+        origin is - so upstream's tags never come along), then fast-forward to it."""
         with svc.fifo:                                  # the request in flight finishes first
-            print(f"[maya] updating Project Maya to {tag} ...", flush=True)
+            print(f"[maya] updating to {tag} ...", flush=True)
             before = None
             try:
                 before = git(self.root, "rev-parse", "HEAD", timeout=20).stdout.strip()
-                r = git(self.root, "fetch", "--tags", "origin", timeout=600)
+                r = git(self.root, "fetch", "--no-tags", src, f"+refs/tags/{tag}:refs/tags/{tag}", timeout=600)
                 if r.returncode:
                     raise RuntimeError(f"git fetch failed: {last_line(r.stderr)}")
                 r = git(self.root, "merge", "--ff-only", f"refs/tags/{tag}", timeout=120)
@@ -170,7 +196,7 @@ class Updater:
                 print(f"[maya] the update did not happen: {err}", flush=True)
                 self.state.update(state="failed", error=err, ended=time.time())
                 return
-            print(f"[maya] updated the files {before[:9] if before else ''} -> {tag}; Maya starts again (maya.py "
+            print(f"[maya] updated the files {before[:9] if before else ''} -> {tag}; Kestrel starts again (maya.py "
                   "compiles what changed in the engine, then loads the model) ...", flush=True)
             svc.close_for_restart()
             os._exit(UPDATE_EXIT)

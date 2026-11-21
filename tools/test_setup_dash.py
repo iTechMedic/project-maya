@@ -368,7 +368,7 @@ class Start(unittest.IsolatedAsyncioTestCase):
                 await until(lambda: app.pending is not None)               # the server ended: the failure ...
                 self.assertEqual(app.view, T.LOG)                          # ... on the log's page, in sight
                 self.assertTrue(app.query_one("#page").display)
-                self.assertIn("Maya stopped", str(app.query_one("#ask").border_title))   # (not the setup)
+                self.assertIn("Kestrel stopped", str(app.query_one("#ask").border_title))   # (not the setup)
                 await pilot.press("enter")
             self.assertEqual(app.return_value[0], "fail")
         finally:
@@ -416,7 +416,7 @@ class Start(unittest.IsolatedAsyncioTestCase):
         try:
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.2)
-                self.assertIn("Starting Maya", app.query_one("#card").plain)
+                self.assertIn("Starting Kestrel", app.query_one("#card").plain)
                 t0 = time.time()
                 while app.state[T.SERVE] != "ready":
                     self.assertLess(time.time() - t0, 20, "the stand-in server did not get ready")

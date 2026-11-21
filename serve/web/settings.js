@@ -57,9 +57,10 @@ function General() {
     <${Row} label="Theme" sub="System follows your computer's light or dark setting.">
       <${Seg} label="Theme" value=${themeChoice()} onChange=${setTheme}
         options=${[{id: "system", label: "System"}, {id: "dark", label: "Dark"}, {id: "light", label: "Light"}]}/><//>
-    <${Row} label="Colours" sub="Default: neutral greys with violet as the accent. Violet: violet-tinted surfaces and a soft glow.">
+    <${Row} label="Colours" sub="Kestrel: navy and orange (Dusk in the dark theme, Dawn in the light one). Ember: charcoal, no blue. Glacier: an ice-blue accent. Midnight: high contrast.">
       <${Seg} label="Colours" value=${schemeChoice()} onChange=${setScheme}
-        options=${[{id: "default", label: "Default"}, {id: "violet", label: "Violet"}]}/><//>
+        options=${[{id: "default", label: "Kestrel"}, {id: "ember", label: "Ember"}, {id: "glacier", label: "Glacier"},
+                   {id: "midnight", label: "Midnight"}]}/><//>
     <${Row} label="Show thinking as it's written" sub="It folds away into “Thought for …” once the answer starts.">
       <${Switch} label="Show thinking as it's written" on=${P.show} onChange=${(v) => savePrefs({show: v})}/><//><//>
     ${isPhone() ? null   /* (a phone: Enter is a new line and there are no shortcuts to list) */
@@ -94,7 +95,7 @@ function ModelCtx() {
   };
   return html`<${Group} cap="The running model">
     <div class="model-card"><${ModelLogo} model=${h.model} size=${36}/>
-      <span><b>${modelName(h.model)}</b><span>${[h.model, engine, h.version ? `Project Maya v${h.version}` : ""].filter(Boolean).join(" · ")}</span></span></div>
+      <span><b>${modelName(h.model)}</b><span>${[h.model, engine, h.version ? `Kestrel ${h.kestrel_version || "?"} · build ${h.version}` : ""].filter(Boolean).join(" · ")}</span></span></div>
     ${c ? html`<div class="set-block">
       <${CtxSlider} id="set-ctx" value=${v} now=${c.context} stops=${stops} disabled=${!!S.reload} hint=${est}
         onChange=${(n) => setCtx(stops.indexOf(n))}/>
@@ -114,12 +115,12 @@ function Port() {
   const pi = S.portInfo, pv = /^\d+$/.test(port.trim()) ? +port.trim() : null;
   const portChanged = pi && pv != null && pv !== pi.port;
   return html`${pi && pi.port && pi.saved ? html`
-      <${Row} label="Port" htmlFor="set-port" sub="Where this page and the API listen. A new port starts Maya again there, and this page follows.">
+      <${Row} label="Port" htmlFor="set-port" sub="Where this page and the API listen. A new port starts Kestrel again there, and this page follows.">
         <input id="set-port" class="input input--num" inputmode="numeric" value=${port} onInput=${(ev) => setPort(ev.target.value)}/><//>
       ${portChanged ? html`<div class="callout callout--warn">
         <span>${pv < 1024 || pv > 65535 ? "Use a number from 1024 to 65535."
-          : pi.restarts ? `Maya starts again on port ${pv} (${loadTime()}). Apps that use the API need the new address too.`
-                        : `Saved for the next start: this server was not started by Maya's start script, so it stays on ${pi.port} until then.`}</span>
+          : pi.restarts ? `Kestrel starts again on port ${pv} (${loadTime()}). Apps that use the API need the new address too.`
+                        : `Saved for the next start: this server was not started by Kestrel's start script, so it stays on ${pi.port} until then.`}</span>
         ${pv >= 1024 && pv <= 65535 ? html`<button type="button" class="btn btn--primary btn--sm" onClick=${() => confirmPort(pv)}>Move to ${pv}</button>` : null}
       </div>` : null}` : null}`;
 }
@@ -269,7 +270,7 @@ function Tools() {
         </div>`;
       })}<//>`
     : html`<p class="set-note">No MCP servers are set up. Add them to the run config (“mcpServers”, as Claude Desktop writes them)
-        or start Maya with --mcp-config, and their tools appear here.</p>`}`;
+        or start Kestrel with --mcp-config, and their tools appear here.</p>`}`;
 }
 
 // ------------------------------------------------------------------ Connect your tools (as in v1.1.52: both APIs' base URLs,
@@ -278,7 +279,7 @@ function Connect() {
   const base = location.origin, model = S.health.model, key = !!S.health.api_key;
   const [tab, setTab] = useState("claude");
   const [apikey, setKey] = useState(store.get("apikey", ""));
-  const auth = key ? "<your API key>" : "maya";
+  const auth = key ? "<your API key>" : "kestrel";
   const examples = {
     claude: ["Claude Code", `ANTHROPIC_BASE_URL=${base} ANTHROPIC_AUTH_TOKEN=${auth} claude`],
     openai: ["OpenAI apps and SDKs", `OPENAI_BASE_URL=${base}/v1\nOPENAI_API_KEY=${key ? "<your API key>" : "any-text"}\nmodel: ${model}`],
@@ -358,11 +359,11 @@ function Savings() {
   useEffect(() => { api("api/savings").then(setR).catch((e) => setErr(e.message)); }, []);
   const reset = async () => {
     if (!await confirmDialog("Start over from $0?", "<p>Every model's count of tokens and what they would have cost goes back to zero. The prices stay. This cannot be undone.</p>", "Start over", true)) return;
-    try { setR(await api("api/savings/reset", {method: "POST", body: {}})); toast("success", "Started over", "Maya counts from $0 again."); }
+    try { setR(await api("api/savings/reset", {method: "POST", body: {}})); toast("success", "Started over", "Kestrel counts from $0 again."); }
     catch (e) { toast("error", "Not reset", e.message, 6000); }
   };
   const since = r && r.since ? new Date(r.since * 1000).toLocaleDateString([], {month: "short", day: "numeric"}) : "";
-  return html`<${Head} title="Usage and savings" intro="The sidebar's Saved line: what each model's own API would have charged for the same tokens. Change a price when the API's changes, or give one to a model without it. Maya keeps the tokens, so every total is counted again with the new prices."/>
+  return html`<${Head} title="Usage and savings" intro="The sidebar's Saved line: what each model's own API would have charged for the same tokens. Change a price when the API's changes, or give one to a model without it. Kestrel keeps the tokens, so every total is counted again with the new prices."/>
     ${err ? html`<p class="set-note">${err}</p>` : !r ? html`<p class="set-note">Reading the prices…</p>`
       : !(r.price_list || []).length ? html`<p class="set-note">Nothing is counted on this server: it runs without a model config.</p>`
       : html`<div class="prices">${r.price_list.map((p) => html`<${PriceCard} key=${p.model} p=${p} onSaved=${setR}/>`)}</div>
@@ -388,8 +389,8 @@ function UpdateCard() {
     const to = w ? w.to : state.to;
     tone = "accent"; icon = "download";
     title = `Updating to v${to}…`;
-    text = w && w.down ? "Maya is starting again: it compiles what changed in the engine and loads the model (a few minutes; the terminal shows the progress). This page reloads when it is back."
-                       : "Maya finishes the answer it is writing, then downloads the update.";
+    text = w && w.down ? "Kestrel is starting again: it compiles what changed in the engine and loads the model (a few minutes; the terminal shows the progress). This page reloads when it is back."
+                       : "Kestrel finishes the answer it is writing, then downloads the update.";
   } else if (state && state.state === "failed") {
     tone = "danger"; icon = "error";
     title = "The update did not happen";
@@ -397,14 +398,14 @@ function UpdateCard() {
     acts = html`${notes}${u.can_update ? html`<button type="button" class="btn btn--primary btn--sm" onClick=${startUpdate}>Try again</button>` : null}`;
   } else if (u.newer) {
     tone = "accent"; icon = "download";
-    title = `Project Maya v${latest.version} is out`;
+    title = `Kestrel ${latest.version} is out`;
     text = latest.summary || "";
     if (!u.can_update) how = `Update by hand: ${u.by_hand}. This page can't, because ${u.blocker}.`;
     acts = html`${notes}${u.can_update ? html`<button type="button" class="btn btn--primary btn--sm" onClick=${startUpdate}>Update to v${latest.version}</button>` : null}`;
   } else if (u.error) {
     icon = "warning";
     title = "Couldn't check for updates";
-    text = `${u.error}. Project Maya v${u.current || "?"} is running.`;
+    text = `${u.error}. Kestrel ${u.current || "?"} is running.`;
     acts = again("Try again");
   } else if (u.latest) {
     tone = "ok"; icon = "check";
@@ -430,7 +431,7 @@ function gpuNames(name, count) {
 }
 function facts() {
   const m = S.metrics || {}, eng = m.engine || {}, hw = m.hardware || {}, st = m.hardware_static || {}, storage = m.storage;
-  const ver = eng.maya_version || S.health.version;
+  const ver = eng.maya_version || S.health.version, kver = eng.kestrel_version || S.health.kestrel_version;
   const kvPerTok = eng.kv_gb && eng.kv_ctx ? (eng.kv_gb * 1073741824) / eng.kv_ctx : null;
   let kv;
   if (eng.engine_kind === "glm-fast") {
@@ -454,7 +455,7 @@ function facts() {
                                   : gpus.map((g) => `GPU ${g.index}: ${link(g)}`).join(" · "))
              : (hw.gpu_pcie_gen_max || hw.gpu_pcie_gen) ? `Gen${hw.gpu_pcie_gen_max || hw.gpu_pcie_gen}${hw.gpu_pcie_width ? ` x${hw.gpu_pcie_width}` : ""}` : null;
   return [
-    ["Version", ver ? `Project Maya v${ver}${eng.version ? ` · engine ${eng.version}` : ""}` : null],
+    ["Version", ver ? `Kestrel ${kver || "?"} · build ${ver}${eng.version ? ` · engine ${eng.version}` : ""}` : null],
     ["Model", eng.model || S.health.model],
     ["Engine", eng.engine_kind ? (ENGINES[eng.engine_kind] || eng.engine_kind) : null],
     ["Context", eng.max_context ? `${fmt(eng.max_context)} tokens` : null],

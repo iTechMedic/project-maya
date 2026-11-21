@@ -64,6 +64,58 @@ class Pieces(unittest.TestCase):
             net.assert_not_called()
 
 
+class KestrelReleases(unittest.TestCase):
+    """Kestrel's releases: tagged kestrel-vX.Y.Z on Kestrel's repository, never upstream's."""
+
+    def test_kestrel_tags_are_versions(self):
+        self.assertEqual(U.vtuple("kestrel-v0.1.2"), (0, 1, 2))
+        self.assertGreater(U.vtuple("kestrel-v0.1.10"), U.vtuple("kestrel-v0.1.9"))
+        self.assertIsNone(U.vtuple("maya-v0.1.0"))
+
+    def test_an_upstream_origin_asks_kestrels_repository(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".git").mkdir()
+            with mock.patch.object(U, "origin_repo", return_value="mw00/project-maya"):
+                self.assertEqual(U.release_repo(d), U.KESTREL_REPO)
+            with mock.patch.object(U, "origin_repo", return_value="someone/kestrel"):    # (a fork of Kestrel: its own)
+                self.assertEqual(U.release_repo(d), "someone/kestrel")
+            self.assertEqual(U.release_repo(Path(d) / "no-git"), U.KESTREL_REPO)          # (an archive: Kestrel's)
+
+    def test_the_check_reads_kestrels_latest_release(self):
+        class Reply:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self.body
+
+        rel = b'{"tag_name": "kestrel-v0.2.0", "html_url": "u", "body": "**Faster.**", "published_at": "p"}'
+        u = U.Updater("0.1.0")
+        with mock.patch.object(U, "release_repo", return_value=U.KESTREL_REPO), \
+                mock.patch.object(U.urllib.request, "urlopen", return_value=Reply(rel)) as net:
+            info = u.check(force=True)
+        self.assertIn(f"/repos/{U.KESTREL_REPO}/releases/latest", net.call_args[0][0].full_url)
+        self.assertEqual(info["latest"]["version"], "0.2.0")
+        self.assertEqual(info["latest"]["fetch"], f"https://github.com/{U.KESTREL_REPO}.git")
+        self.assertTrue(info["newer"])
+
+    def test_no_release_yet_is_not_an_error(self):
+        none = U.urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", {}, None)
+        u = U.Updater("0.1.0")
+        with mock.patch.object(U, "release_repo", return_value=U.KESTREL_REPO), \
+                mock.patch.object(U.urllib.request, "urlopen", side_effect=none):
+            info = u.check(force=True)
+        self.assertIsNone(info["error"])
+        self.assertIsNone(info["latest"])
+        self.assertFalse(info["newer"])
+
+
 @unittest.skipUnless(HAVE_GIT, "git is not installed")
 class Updating(unittest.TestCase):
     """An origin with v1.0.0 and v1.0.1, a clone at v1.0.0, and the server's side of the update."""

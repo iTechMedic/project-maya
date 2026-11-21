@@ -89,16 +89,27 @@ def gb(b, d: int = 1) -> str:                           # binary GB, as the web 
     return "–" if b is None else fmt(b / 2**30, d)
 
 
+# the same in a 3 x 5 pixel font drawn with the half and full blocks alone (▀ ▄ █: the IBM PC's own, in every terminal
+# font), two pixel rows to a character - the quarter blocks font8x8 needed come apart in many fonts
+SMALL = {"0": ("111", "101", "101", "101", "111"), "1": ("010", "110", "010", "010", "111"),
+         "2": ("111", "001", "111", "100", "111"), "3": ("111", "001", "111", "001", "111"),
+         "4": ("101", "101", "111", "001", "001"), "5": ("111", "100", "111", "001", "111"),
+         "6": ("111", "100", "111", "101", "111"), "7": ("111", "001", "001", "001", "001"),
+         "8": ("111", "101", "111", "101", "111"), "9": ("111", "101", "111", "001", "111"),
+         ".": ("0", "0", "0", "0", "1"), "-": ("000", "000", "111", "000", "000"), "%": ("101", "001", "010", "100", "101")}
+HALVES = " ▀▄█"   # (neither, the top pixel, the bottom one, both)
+
+
 def big(s: str) -> list:
-    """`s` (digits, ".", "-") in font8x8, 2 x 2 pixels to a character; a "." keeps only its own two columns."""
+    """`s` (digits, ".", "-", "%") big: four rows - three of SMALL's pixels, two to a character, and a blank one (the
+    lines beside it keep their four rows)."""
     rows = [""] * 4
     for c in s:
-        px = [[DIGITS[c][r] >> b & 1 for b in range(8)] for r in range(8)]
-        cells = range(1, 2) if c == "." else range(4)
-        for i, r in enumerate(range(0, 8, 2)):
-            rows[i] += "".join(QUADRANTS[px[r][2 * x] | px[r][2 * x + 1] << 1 | px[r + 1][2 * x] << 2 |
-                                         px[r + 1][2 * x + 1] << 3] for x in cells)
-    return rows
+        px = [[int(b) for b in r] for r in SMALL[c]] + [[0] * len(SMALL[c][0])]
+        for i in range(3):
+            rows[i] += "".join(HALVES[px[2 * i][x] | px[2 * i + 1][x] << 1] for x in range(len(px[0]))) + " "
+    width = len(rows[0])
+    return [r[:width] for r in rows[:3]] + [" " * width]
 
 
 def spark(values, width: int, top=None, color: str | None = None) -> Text:

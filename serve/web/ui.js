@@ -9,8 +9,14 @@ export const Icon = ({name, sm, lg, cls = ""}) => html`
     <use href=${`${SPRITE}#i-${name}`}/></svg>`;
 
 // the Maya logo (the white M with its dots on indigo - the same picture as the tab and home-screen icons)
+// Kestrel's mark (web/icon.svg): its parts take the scheme's colours (kestrel.css, --k-mark-*)
 export const MayaMark = ({size = 28}) => html`
-  <img class="maya-mark" src="web/icon-192.png" width=${size} height=${size} alt="" aria-hidden="true"/>`;
+  <svg class="k-mark" width=${size} height=${size} viewBox="0 0 64 64" aria-hidden="true">
+    <rect class="k-tile" width="64" height="64" rx="15"/>
+    <path class="k-head" d="M12 52C12 33 23 18 39 18c7.5 0 12.8 3.4 14.6 8.6l6.4 3c.6.3.6 1.2 0 1.5l-6.6 3.3C51.6 41.2 45.6 46 37.6 47.4L24 52z"/>
+    <path class="k-beak" d="M53.6 26.6l6.4 3c.6.3.6 1.2 0 1.5l-6.6 3.3c1-2.6 1-5.2.2-7.8z"/>
+    <circle class="k-eye" cx="43.4" cy="27.4" r="3.6"/><circle class="k-head" cx="44" cy="27.2" r="1.7"/>
+    <path class="k-eye" d="M40.2 31.2c1.4 1 2.6 1.2 3.6 1-1 4.4-3 8-6.2 10.8-.2-4.2.8-8.2 2.6-11.8z"/></svg>`;
 
 export function ModelLogo({model, size = 32, cls = ""}) {
   const l = modelLogo(model);

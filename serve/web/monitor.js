@@ -35,7 +35,7 @@ function Banners({m}) {
   }
   const eng = m.engine || {};
   if (eng.gpu_commit_capped_gb > 0) {   // (DeepSeek on a Windows APU: the page file kept experts off the GPU)
-    out.push(["warn", `${fmt(eng.gpu_commit_capped_gb)} GB of experts stay off the GPU: Windows' page file is too small to hold them there. A page file of ${fmt(eng.pagefile_hint_gb)} GB keeps them on the GPU (System > About > Advanced system settings > Performance > Advanced > Virtual memory), then restart Maya.`]);
+    out.push(["warn", `${fmt(eng.gpu_commit_capped_gb)} GB of experts stay off the GPU: Windows' page file is too small to hold them there. A page file of ${fmt(eng.pagefile_hint_gb)} GB keeps them on the GPU (System > About > Advanced system settings > Performance > Advanced > Virtual memory), then restart Kestrel.`]);
   }
   const gpus = (m.hardware || {}).gpus || [{index: null, temp: (m.hardware || {}).gpu_temp}];
   for (const g of gpus) {
@@ -99,8 +99,8 @@ function Throughput({m}) {
       <div class="speed"><span class="speed__label"><i class="key key--line"></i>Decode · ${many ? `${live.writing} writing` : gen ? "writing now" : live.state === "reading" ? "reading the prompt" : last ? "last request" : "waiting for a request"}</span>
         <div class="speed__row"><span class="speed__big num">${speed == null ? "–" : fmt(speed, 1)}<small>tok/s</small></span>
           ${/* the peak beside the live Decode (below it on a phone), small: a reference, not a second headline */ ""}
-          <span class="speed__peak num" title=${peak ? `The highest decode speed since Maya started: ${fmt(peak.tok_s, 1)} tok/s at ${at}, ${fmt(peak.tokens)} tokens into the answer. Live speeds and finished answers count, from 32 tokens on.`
-              : "The highest decode speed since Maya started. Live speeds and finished answers count, from 32 tokens on."}>Peak ${peak ? `${fmt(peak.tok_s, 1)} tok/s` : "–"}</span></div></div>
+          <span class="speed__peak num" title=${peak ? `The highest decode speed since Kestrel started: ${fmt(peak.tok_s, 1)} tok/s at ${at}, ${fmt(peak.tokens)} tokens into the answer. Live speeds and finished answers count, from 32 tokens on.`
+              : "The highest decode speed since Kestrel started. Live speeds and finished answers count, from 32 tokens on."}>Peak ${peak ? `${fmt(peak.tok_s, 1)} tok/s` : "–"}</span></div></div>
       <div class="speed" title="Prompt tokens read per second (the prefill), counting only the tokens read - not the ones reused from the conversation cache. While a prompt is read and after: the highest rate of that reading.">
         <span class="speed__label"><i class="key key--dash"></i>Prefill · ${pwhat}</span>
         <div class="speed__row"><span class="speed__mid num">${prefill == null ? "–" : fmt(prefill)}<small>tok/s</small></span></div></div>
@@ -388,7 +388,7 @@ function gpuDetail(g, segs, m) {
     helper: "separate helper expert pool; CPU backing available for fallback",
     vision: g.vision_lent ? "the pool's tail, while it encodes" : g.vision_own ? "the vision tower, in the engine's process" : "its own process",
     rest: "the driver's reserve and context, conversation snapshots and small buffers",
-    other: "processes that are not Maya's",
+    other: "processes that are not Kestrel's",
     free: (g.free || 0) < 1.5 * GIB ? "kept free for the driver and the sampler" : "unused",
     used: "",
   };
@@ -504,7 +504,7 @@ function GpuMap({m}) {
 // ------------------------------------------------------------------ the hardware cards
 const METRICS = [
   {key: "gpu", label: "GPU active", unit: "%", series: "gpu_util", max: 100,
-   tip: "NVIDIA's counter: the share of time any GPU kernel is running. While Maya answers it reads 100% - between bursts of work the GPU waits (inside a kernel) for experts from RAM and the CPU. Power shows how hard it really works."},
+   tip: "NVIDIA's counter: the share of time any GPU kernel is running. While Kestrel answers it reads 100% - between bursts of work the GPU waits (inside a kernel) for experts from RAM and the CPU. Power shows how hard it really works."},
   {key: "vram", label: "VRAM", series: "gpu_mem_used"},
   {key: "power", label: "Power", unit: "W", series: "gpu_power"},
   {key: "temp", label: "GPU temp", unit: "°C", series: "gpu_temp", tone: "warn"},

@@ -93,7 +93,7 @@ from serve.responses import (ResponseStore, input_items, input_page, normalize_r
 from serve.response_config import ENV_KEYS as RESPONSE_ENV_KEYS, limits_from_env  # noqa: E402
 from serve.response_jobs import BackgroundJobs, JobError  # noqa: E402
 from serve.response_store import StoreBusy  # noqa: E402
-from serve.update import RESTART_EXIT, Updater  # noqa: E402
+from serve.update import ISSUES, RESTART_EXIT, Updater  # noqa: E402
 from serve import glm_dsa_product, glm_dsa_tune  # noqa: E402  (GLM-5.3, glm-dsa: the pack test, its release gate, its knobs)
 from serve.glm_dsa_template import reads_images  # noqa: E402
 import maya_names  # noqa: E402  (tools/) the settings' names users see (MAYA_*) and the older ones the code reads
@@ -103,6 +103,10 @@ try:                        # Project Maya's release (the dashboard's About; the
     MAYA_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip() or None
 except OSError:
     MAYA_VERSION = None
+try:                        # Kestrel's own release (KESTREL_VERSION; VERSION above stays upstream's: shown as the build)
+    KESTREL_VERSION = (ROOT / "KESTREL_VERSION").read_text(encoding="utf-8").strip() or None
+except OSError:
+    KESTREL_VERSION = None
 MAC_FREE_SETTLE_BYTES = 1 << 30    # macOS: the old engine's memory is back once free memory rises by less than this ...
 MAC_FREE_POLL_S = 0.5              # ... between two reads this far apart
 
@@ -1173,12 +1177,12 @@ class StrataEngine:
         for line in reversed(tail.splitlines()):
             if "issue #29" in line:
                 return ("The engine stopped itself because it had stopped making progress - a hang it caught. Its log "
-                        "line: " + line.strip() + " - please report it at github.com/mw00/project-maya/issues.")
+                        "line: " + line.strip() + " - please report it at " + ISSUES + ".")
             if "a GPU's state is unknown" in line:
                 return ("The engine stopped itself because a GPU took a fault inside a kernel (an illegal address or "
                         "the like), after which that GPU's state is lost; a fresh engine starts with the next request. "
                         "Its log line: " + line.strip() + " - the lines above it name the GPU and the error; please "
-                        "report it at github.com/mw00/project-maya/issues.")
+                        "report it at " + ISSUES + ".")
         rc = getattr(getattr(self, "proc", None), "returncode", None)
         if rc in (-2, -15):   # (#539: read as a lack of RAM)
             return ("A signal from outside ended it (SIGINT or SIGTERM: Ctrl+C, kill, a service manager), not a lack "
@@ -1189,7 +1193,7 @@ class StrataEngine:
             return ("The engine aborted (SIGABRT): a check inside it or inside a library it calls (the GPU's runtime) "
                     "failed - not a lack of RAM; a fresh engine starts with the next request. "
                     + (f"Its log line: {hit[:600]} - please" if hit else "The lines above in its log name it; please")
-                    + " report it at github.com/mw00/project-maya/issues.")
+                    + " report it at " + ISSUES + ".")
         return ("The usual cause is running out of RAM: Linux then ends the biggest program (check: sudo dmesg | "
                 "grep -i -E 'killed process|out of memory'); Windows slows down instead. Close other programs or use a "
                 "smaller model (Q2_0 / IQ2_XS).")
@@ -2625,7 +2629,7 @@ class Service:
         self.puller = None                               # serve/model_pull.py: the one model download (the Models page, /api/pull)
         self._life, self._life_from = "running", None    # ENGINE_LIFE, and while "loading" what it was before
         self._engine_start = threading.Lock()            # ensure_engine: one start, also with --parallel's requests
-        self.updater = Updater(MAYA_VERSION)             # About > Updates: a newer release, and updating to it
+        self.updater = Updater(KESTREL_VERSION)             # About > Updates: a newer release, and updating to it
         # The ids that end an answer server-side.  A string that is not a special token in this vocabulary
         # (GLM-5.3 has no <|im_end|>) encodes to its TEXT pieces, whose ids occur inside ordinary answers -
         # stopping on them would cut generation at any '<'.  Only single-token (real special) encodings count.
@@ -3418,7 +3422,7 @@ class Service:
         hw, st = tel.get("now") or {}, tel.get("static") or {}
         gib = lambda b: f"{b / 2**30:.1f} GB" if isinstance(b, (int, float)) else "?"  # noqa: E731
         import platform
-        out = [f"Project Maya {MAYA_VERSION or '?'} - report of {time.strftime('%Y-%m-%d %H:%M')}",
+        out = [f"Kestrel {KESTREL_VERSION or '?'} (build {MAYA_VERSION or '?'}) - report of {time.strftime('%Y-%m-%d %H:%M')}",
                f"System: {platform.platform()}, Python {platform.python_version()}",
                f"GPU: {st.get('gpu_name') or 'not readable'} ({gib(hw.get('gpu_mem_total'))} VRAM)",
                f"CPU: {st.get('cpu_name') or '?'}, {st.get('threads') or '?'} threads; RAM {gib(hw.get('ram_total'))}",
@@ -3582,7 +3586,7 @@ class Service:
         live["prompt_reused"] = progress[2] if s.get("busy") and progress and len(progress) > 2 else None
         engine = {"model": self.model, "model_label": self.model_label, "max_context": self.engine.max_context,
                   "images": self.vision is not None,
-                  **dict(getattr(self.engine, "info", {}) or {}), "maya_version": MAYA_VERSION,
+                  **dict(getattr(self.engine, "info", {}) or {}), "maya_version": MAYA_VERSION, "kestrel_version": KESTREL_VERSION,
                   "trained_context": self.trained_context,
                   **({"dspark": self.dspark} if self.dspark is not None else {})}
         # the drafters on (empty: drafting is off): the Monitor's Speculation says "off", or the draft acceptance
@@ -6347,7 +6351,7 @@ def make_handler(svc: Service):
                                  # videos: the llama.cpp encoder's (as /v1/models' input_modalities); DeepSeek's and
                                  # MiniMax's engine-run towers read pictures only
                                  "videos": isinstance(svc.vision, Vision),
-                                 "version": MAYA_VERSION, "mcp_tools": bool(svc.mcp), "unloaded": svc.unloaded,
+                                 "version": MAYA_VERSION, "kestrel_version": KESTREL_VERSION, "mcp_tools": bool(svc.mcp), "unloaded": svc.unloaded,
                                  "engine": svc.engine_life(),   # ENGINE_LIFE: running, loading, unloaded, stopped
                                  # the web chat sends past answers' thinking back (a Qwen3.x template keeps it): the
                                  # history then reads as the model wrote it, and the next turn goes on from there
@@ -6571,7 +6575,7 @@ def make_handler(svc: Service):
                     return
                 if path in ("/v1/chat/completions", "/v1/responses", "/v1/messages") and (svc.reloading() or svc.updater.busy()):
                     # a context change is reloading the model, or Maya is updating: say so, and when to try again
-                    why = ("Project Maya is updating and starts again in a few minutes" if svc.updater.busy() else
+                    why = ("Kestrel is updating and starts again in a few minutes" if svc.updater.busy() else
                            "the model is reloading with a new context size; try again in a minute")
                     body = json.dumps({"error": {"type": "overloaded_error", "message": why}}).encode()
                     self.send_response(503)

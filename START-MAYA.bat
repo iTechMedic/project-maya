@@ -4,7 +4,7 @@ rem downloads the model, builds the pack and starts the dashboard; later runs ju
 rem START-MAYA.bat --help lists the options. Like ./maya.sh, nothing is installed system-wide: a missing Python,
 rem compiler or CUDA toolkit is reported with where to get it.
 setlocal
-title Project Maya
+title Kestrel
 cd /d "%~dp0"
 rem a .venv from an earlier run that failed half-way has a python but no pip: start it again
 if exist ".venv\Scripts\python.exe" (

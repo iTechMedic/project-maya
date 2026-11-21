@@ -5,7 +5,7 @@ import {store, writeClipboard} from "./lib.js";
 
 export const S = {
   // what the server says
-  health: {model: "maya", images: false, max_context: 0, version: null, api_key: false, mcp_tools: false},
+  health: {model: "kestrel", images: false, max_context: 0, version: null, api_key: false, mcp_tools: false},
   metrics: null,            // GET /metrics, every second
   conn: "connecting",       // "ok", "connecting", "down" (three failed polls), "key" (an API key is needed)
   mcp: {servers: [], tools: 0},
@@ -119,7 +119,7 @@ export function applyTheme() {
   const t = c === "system" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : c;
   document.documentElement.dataset.theme = t;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === "dark" ? "#19191d" : "#ffffff";
+  if (meta) meta.content = t === "dark" ? "#0b1a2e" : "#ffffff";
 }
 export function setTheme(c) {
   try { localStorage.setItem("maya.theme", c); localStorage.removeItem("maya.ui-theme"); } catch (e) { /* ignore */ }
@@ -127,15 +127,20 @@ export function setTheme(c) {
   emit();
 }
 matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (themeChoice() === "system") applyTheme(); });
-// the colours, in either theme: "default" (neutral greys, violet the accent) or "violet" (violet-tinted surfaces and a soft
-// glow, the earlier dashboard's look) - saved as "maya.scheme" in this browser; <html data-scheme="violet"> (tokens.css)
-export function schemeChoice() { try { return localStorage.getItem("maya.scheme") === "violet" ? "violet" : "default"; } catch (e) { return "default"; } }
+// the colours, in either theme: "default" (Kestrel's own: Dusk in the dark theme, Dawn in the light one) or a scheme on
+// top of it (kestrel.css) - saved as "maya.scheme" in this browser; <html data-scheme="ember"> etc.  (A saved "violet",
+// the earlier look, reads as the default.)
+export const SCHEMES = ["ember", "glacier", "midnight"];
+export function schemeChoice() {
+  try { const c = localStorage.getItem("maya.scheme"); return SCHEMES.includes(c) ? c : "default"; } catch (e) { return "default"; }
+}
 export function applyScheme() {
-  if (schemeChoice() === "violet") document.documentElement.dataset.scheme = "violet";
+  const c = schemeChoice();
+  if (c !== "default") document.documentElement.dataset.scheme = c;
   else delete document.documentElement.dataset.scheme;
 }
 export function setScheme(c) {
-  try { if (c === "violet") localStorage.setItem("maya.scheme", c); else localStorage.removeItem("maya.scheme"); } catch (e) { /* ignore */ }
+  try { if (SCHEMES.includes(c)) localStorage.setItem("maya.scheme", c); else localStorage.removeItem("maya.scheme"); } catch (e) { /* ignore */ }
   applyScheme();
   emit();
 }
