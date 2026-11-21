@@ -397,7 +397,7 @@ class Document:
             elif keep_image and f in ("DCTDecode", "DCT", "JPXDecode", "CCITTFaxDecode", "CCF", "JBIG2Decode"):
                 return data
             else:
-                raise PdfError(f"a stream filter Maya does not read: {f}")
+                raise PdfError(f"a stream filter Kestrel does not read: {f}")
             pred = int(self.get(p.get("Predictor", 1)) or 1) if f in ("FlateDecode", "Fl", "LZWDecode", "LZW") else 1
             if pred >= 10:
                 data = _png_unpredict(data, int(self.get(p.get("Columns", 1)) or 1),

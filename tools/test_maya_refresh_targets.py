@@ -75,7 +75,7 @@ class FailedUpdateBuildTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     maya.compile_engine(["70"], [0], "nvcc", None, Path(d) / "llama", "source-sha", soft=True)
             self.assertIn("not started", stop.call_args.args[0])
-            self.assertIn("start Maya again", stop.call_args.args[1])
+            self.assertIn("start Kestrel again", stop.call_args.args[1])
 
     def test_refresh_without_the_cuda_compiler_stops(self):
         with tempfile.TemporaryDirectory() as d:

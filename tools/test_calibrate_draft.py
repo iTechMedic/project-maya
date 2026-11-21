@@ -232,7 +232,7 @@ class InTheSetup(unittest.TestCase):
 
     def test_asked_for_it_still_refuses_a_loaded_model(self):
         for busy, engines, says in (([(0, 20000)], [], "more than a display uses"),
-                                    ([(1, 1100)], [(1, "maya", "77")], "another Maya model is loaded there")):
+                                    ([(1, 1100)], [(1, "maya", "77")], "another Kestrel model is loaded there")):
             with patch.object(maya, "maya_engines_on", return_value=engines):
                 out, calls, cfg = self.run_it(result("dflash2"), busy=busy, why="asked for")
             self.assertFalse(out)

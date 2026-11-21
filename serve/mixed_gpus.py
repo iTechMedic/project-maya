@@ -208,7 +208,7 @@ def engine_class(base, wait_gpu_release):
         def _fall(self, why: str, again: bool = True):
             self.mixed_off = why
             print(f"[maya] two GPUs (--mixed-gpus): {why} - the model runs on the AMD GPU alone" +
-                  (" from here (it loads all its layers now; Maya's next start tries both GPUs again)" if again else ""),
+                  (" from here (it loads all its layers now; Kestrel's next start tries both GPUs again)" if again else ""),
                   flush=True)
 
         def _start_mixed(self, spawn):

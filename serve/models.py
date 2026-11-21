@@ -1330,7 +1330,7 @@ def save(path: Path, settings: dict) -> dict:
     first time the page changes it, what the setup wrote: installer.as_set_up, the page's Reset)."""
     cfg = read(path)
     if not cfg:
-        raise ValueError(f"{Path(path).name}: not a config Maya can read")
+        raise ValueError(f"{Path(path).name}: not a config Kestrel can read")
     return _commit(path, cfg, apply(cfg, settings))
 
 
@@ -1428,7 +1428,7 @@ def turbo_enable(path: Path) -> dict:
     must start again."""
     cfg = read(path)
     if not cfg:
-        raise ValueError(f"{Path(path).name}: not a config Maya can read")
+        raise ValueError(f"{Path(path).name}: not a config Kestrel can read")
     if turbo_on(cfg):
         raise ValueError("Turbo is already on")
     cur, patch = settings_of(cfg), turbo_patch(cfg)
@@ -1446,7 +1446,7 @@ def turbo_disable(path: Path) -> dict:
     back to what they were."""
     cfg = read(path)
     if not cfg:
-        raise ValueError(f"{Path(path).name}: not a config Maya can read")
+        raise ValueError(f"{Path(path).name}: not a config Kestrel can read")
     note = cfg.get("turbo")
     if not isinstance(note, dict):
         raise ValueError("Turbo is not on")
@@ -1645,7 +1645,7 @@ def delete_plan(root: Path, path: Path) -> dict:
     models = _res((cfg.get("installer") or {}).get("models_dir"))
     pack = _res(pack_of(cfg))
     if models is None or pack is None:
-        out["why"] = "Maya's setup did not download this model's files, so it does not know which ones are its own"
+        out["why"] = "Kestrel's setup did not download this model's files, so it does not know which ones are its own"
         return out
     # (the folders the setup downloads into: every config's --models-dir and its own Maya-data/models - never a drive's
     # root, the home folder or one it is in)
@@ -1654,7 +1654,7 @@ def delete_plan(root: Path, path: Path) -> dict:
              [_res(Path(root).parent / "Maya-data" / "models")]
              if k is not None and k.is_dir() and k != Path(k.anchor) and not _within(home, k)]
     if models not in known:
-        out["why"] = f"its models folder {models} is not one Maya downloads into, so Maya deletes nothing in it"
+        out["why"] = f"its models folder {models} is not one Kestrel downloads into, so Kestrel deletes nothing in it"
         return out
     folder = pack.parent
     out["folder"] = str(folder)
@@ -1680,7 +1680,7 @@ def delete_plan(root: Path, path: Path) -> dict:
         if inside(p):
             items.append((p, what))
         elif what == "pack":
-            out["kept"].append(f"The pack Maya built in {p} stays: it is outside Maya's models folders, so Maya does "
+            out["kept"].append(f"The pack Kestrel built in {p} stays: it is outside Kestrel's models folders, so Kestrel does "
                                "not delete it. Delete it by hand if you no longer want it.")
 
     downloaded = _within(folder, models)
@@ -1707,7 +1707,7 @@ def delete_plan(root: Path, path: Path) -> dict:
             for u, fs in held.items():
                 keep(folder, "gguf", list(u), len(fs))
         else:
-            out["kept"].insert(0, f"Your own model files in {folder} stay" + ("; only the pack Maya built from them goes."
+            out["kept"].insert(0, f"Your own model files in {folder} stay" + ("; only the pack Kestrel built from them goes."
                                    if any(it == pack for it, _ in items) else "."))
     for v in map(_res, vision_files(cfg)):
         if v is not None and _within(v, models) and not covered(v):

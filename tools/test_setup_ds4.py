@@ -527,7 +527,7 @@ class Calibrate(unittest.TestCase):
                 patch.object(maya.CAL4, "run") as run, patch.object(maya, "warn") as warn:
             self.assertFalse(maya.calibrate_config(self.cfg))
         run.assert_not_called()
-        self.assertIn("another Maya model is loaded there (maya-ds4 on GPU 0, PID 4242)", warn.call_args.args[0])
+        self.assertIn("another Kestrel model is loaded there (maya-ds4 on GPU 0, PID 4242)", warn.call_args.args[0])
 
     def test_a_display_does_not_hold_it_back(self):
         # (#794: --calibrate is always asked for - a GPU that drives a display holds some memory; the tuning runs

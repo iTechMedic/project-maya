@@ -1122,7 +1122,7 @@ class Delete(unittest.TestCase):
         self.assertTrue(plan["ok"])
         self.assertEqual(plan["items"], [])
         self.assertIn("Your own model files", plan["kept"][0])
-        self.assertIn("outside Maya's models folders", plan["kept"][1])
+        self.assertIn("outside Kestrel's models folders", plan["kept"][1])
         out = M.delete(self.d, l, files=True)
         self.assertEqual(out["freed"], 0)
         self.assertEqual(len(list(own.glob("*.gguf"))), 3)
@@ -1189,7 +1189,7 @@ class Delete(unittest.TestCase):
         l.write_text(json.dumps(cfg))
         plan = M.delete_plan(self.d, l)
         self.assertEqual((plan["ok"], plan["items"]), (False, []))
-        self.assertIn("not one Maya downloads into", plan["why"])
+        self.assertIn("not one Kestrel downloads into", plan["why"])
 
     def test_hard_links_are_counted(self):
         m = glm_quant(self.d, "Maya-M")

@@ -11,12 +11,12 @@ The quants are named model first, then the tier by the experts' bits (XS, S, M, 
 deepseek-maya-xs, minimax-maya-xs, glm-5.3-maya-xs ... (tools/maya_quants.py; GLM-5.3's: its download's name,
 G53_MODELS); every name used before still works.
 
-    ./maya.sh                 the first run sets everything up and starts the dashboard; later runs just start it
-    ./maya.sh --setup         set up again (other GPUs, another context length, another model folder)
-    ./maya.sh --check         only check this PC
-    ./maya.sh --backend hip --gpu 0 --check    check an RX 7900 XT / XTX with system ROCm 7
+    ./kestrel.sh                 the first run sets everything up and starts the dashboard; later runs just start it
+    ./kestrel.sh --setup         set up again (other GPUs, another context length, another model folder)
+    ./kestrel.sh --check         only check this PC
+    ./kestrel.sh --backend hip --gpu 0 --check    check an RX 7900 XT / XTX with system ROCm 7
 
-On Windows START-MAYA.bat takes the same options.  Both make the private Python environment (.venv) and run this
+On Windows START-KESTREL.bat takes the same options.  Both make the private Python environment (.venv) and run this
 file.  Its helpers (setup.py) do the PC checks, pip, llama.cpp's source and resumable downloads.
 
 In a terminal the setup runs on a screen of its own (tools/setup_tui.py): the steps, what runs now with a progress
@@ -46,7 +46,7 @@ no tuning step - it balances its own split):
   7. images: compiles the vision encoder (`build-vision/bin/maya-vision`) and fetches the model's vision files
      (1.1 GB, shown and asked first like the model; --no-vision skips it)
   8. writes maya-<model>.json and run-maya-<model>.sh (.bat on Windows) - with the settings tuned for this PC
-     earlier, or it offers the tuning (./maya.sh --calibrate does it any time) - and starts the dashboard on
+     earlier, or it offers the tuning (./kestrel.sh --calibrate does it any time) - and starts the dashboard on
      http://127.0.0.1:8080
 
 The tuning (tools/calibrate_glm.py): decode speed measured with a few splits of the RAM-tier
@@ -54,7 +54,7 @@ experts between the CPU and the PCIe link, with fewer and more CPU threads, and 
 the SSD - with smaller disk reads, in one engine run (~10-15 minutes, the model loads first); a setting is kept when
 it is more than 3% faster than the engine's own choice.  The result goes into the config's "env" (MAYA_GLM_PCIE_SHARE,
 MAYA_GLM_CPU_LANE, MAYA_GLM_READ_CHUNKS) and into ~/.config/project-maya/calibration.json for this PC, model and
-context, so a setup again keeps it.  DeepSeek-V4.1-Flash-1017's (tools/calibrate_ds4_tp.py, ./maya.sh --calibrate only):
+context, so a setup again keeps it.  DeepSeek-V4.1-Flash-1017's (tools/calibrate_ds4_tp.py, ./kestrel.sh --calibrate only):
 decode speed with each --tp that groups the GPUs differently and with fewer CPU threads, an engine start each (~25-40
 minutes on 9 GPUs); a setting is kept when it is more than 5% faster and still reads a long prompt at 60% of the
 config's own speed.  The result goes into the config's args (--tp, --cpu-threads) and into calibration.json.
@@ -85,8 +85,8 @@ from setup import ask, fail, ok, run, say, step, warn  # noqa: E402
 import maya_import as MI  # noqa: E402  --import-model: model files downloaded some other way, found by size + sha256
 import maya_names as N  # noqa: E402  the settings' names users see (MAYA_*) and the older ones the code reads
 import maya_quants as Q  # noqa: E402  the quants' names users see (MiniMax M3.1 · Maya-XS) and the older ones as aliases
-import calibrate_glm as CAL  # noqa: E402  the CPU lane's tuning for this PC (./maya.sh --calibrate)
-import calibrate_ds4_tp as CAL4  # noqa: E402  DeepSeek's: --tp and the CPU threads (./maya.sh --calibrate)
+import calibrate_glm as CAL  # noqa: E402  the CPU lane's tuning for this PC (./kestrel.sh --calibrate)
+import calibrate_ds4_tp as CAL4  # noqa: E402  DeepSeek's: --tp and the CPU threads (./kestrel.sh --calibrate)
 import calibrate_draft as CD  # noqa: E402  the speed calibration: DFlash2 or the MTP block on this PC
 import calibrate_ds4 as CDS  # noqa: E402  DeepSeek's: the DSpark drafter or none, on this PC
 import calibrate_mm3_prefill as CPF  # noqa: E402  MiniMax's: how this PC reads prompts fastest (chunk, GEMMs)
@@ -95,7 +95,7 @@ from serve import glm_link as GL  # noqa: E402  GLM on an AMD APU + an NVIDIA ca
 from strata import maya_sync  # noqa: E402  (tools/strata/) a glm-dsa pack's expert profile and drafting
 
 WIN = S.WIN
-ME = "START-MAYA.bat" if WIN else "./maya.sh"      # how this is started, for the messages
+ME = "START-KESTREL.bat" if WIN else "./kestrel.sh"   # how this is started, for the messages (maya.sh / START-MAYA.bat still work)
 UPDATE_EXIT = 75                                   # the server's exit after the dashboard updated Maya (serve/update.py)
 RESTART_EXIT = 76                                  # ... after it saved a new port: start again on the saved one
 SWITCH_FILE = ".maya-switch.json"                  # ... or the Models page's note: the config to start (serve/models.py)
@@ -604,7 +604,7 @@ DRAFTS = ("mtp", "dflash2")                        # the setup's drafting choice
 # DeepSeek-V4.1-Flash-1017: its own engine (src/ds4, build/maya-ds4) reads LibertAIDAI's EXL3 quant at 2.9 bits in
 # place from its safetensors; its two Engram tables come from DeepSeek's base repo.  Every file is pinned and checked
 # (tools/ds4/download.json).  Linux and NVIDIA RTX 30 / A100 or newer only: its vision tower's BF16 GEMMs, the CPU
-# lane's NUMA memory.  Tensor parallel across pairs of equal GPUs (--tp 2; ./maya.sh --calibrate measures the others),
+# lane's NUMA memory.  Tensor parallel across pairs of equal GPUs (--tp 2; ./kestrel.sh --calibrate measures the others),
 # the rest of the experts in RAM.
 DS4 = "DeepSeek-V4.1-Flash-1017"
 DS4_EXE = BUILD / ("maya-ds4.exe" if WIN else "maya-ds4")
@@ -1197,7 +1197,7 @@ def windows_rocm() -> tuple:
         if absent:
             fail(f"AMD's ROCm SDK is missing {len(absent)} GPU library file(s) after rocm-sdk init (e.g. "
                  f"{absent[0]}): rocBLAS would crash on its first call",
-                 f"install Maya in a shorter folder (e.g. C:\\Maya) and run {ME} there")
+                 f"install Kestrel in a shorter folder (e.g. C:\\Kestrel) and run {ME} there")
         path = lambda what: (S.out([sdk, "path", what]).strip().splitlines() or [""])[-1].strip()
         root = path("--root")
         if root:
@@ -1276,11 +1276,11 @@ def install_rocm(a, chosen) -> None:
     cmd = rocm_pip(archs)
     what = f"AMD's ROCm SDK for Windows with the kernels for {', '.join(archs)}"
     if getattr(a, "check", False) or sys.prefix == sys.base_prefix:
-        fail(f"{what} is not installed", f"install it into Maya's Python environment: {cmdline(cmd)}"
+        fail(f"{what} is not installed", f"install it into Kestrel's Python environment: {cmdline(cmd)}"
              f" - then run {ME} again (or set ROCM_PATH / ROCM_VENV to a ROCm 7 that has one)")
     if ask(f"Install {what} ({THEROCK_VERSION}) into .venv now (pip, from repo.amd.com)?",
            ["y", "n"], "y", getattr(a, "yes", False)) != "y":
-        fail("Maya's HIP engine is compiled with AMD's ROCm SDK", f"install it with: {cmdline(cmd)}")
+        fail("Kestrel's HIP engine is compiled with AMD's ROCm SDK", f"install it with: {cmdline(cmd)}")
     run(cmd)
     if windows_rocm()[0] is None:
         fail("pip installed AMD's ROCm SDK, but rocm-sdk does not answer", f"run {cmdline(cmd)} again and check its "
@@ -1303,7 +1303,7 @@ def vs_2026(vcvars) -> bool:
 
 def check_hip_pc(a, installed=False, text_only=True) -> dict:
     if not WIN and (not sys.platform.startswith("linux") or S.is_wsl()):
-        fail("Maya's HIP backend runs on native Linux or Windows")
+        fail("Kestrel's HIP backend runs on native Linux or Windows")
     vcvars = S.find_vcvars(cuda=False) if WIN else None
     if WIN and vcvars is None:      # (before ROCm's download: ROCm's clang needs its headers)
         fail("Visual Studio Build Tools (2022 or 2026) are needed: ROCm's compiler uses their headers and libraries",
@@ -1317,7 +1317,7 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
     found = S.amd_gpus(hipinfo) if WIN else S.amd_gpus()
     usable = [g for g in found if g["arch"] in HIP_ARCHS + HIP_ARCHS_UNVALIDATED + HIP_ARCHS_WAVE64]
     for g in found:
-        say(f"    {gpu_label(g)} - " + ("can be used" if g in usable else "not supported by Maya's HIP build"))
+        say(f"    {gpu_label(g)} - " + ("can be used" if g in usable else "not supported by Kestrel's HIP build"))
     if not usable:
         fail("no supported AMD GPU found", "this port targets RX 7900 XT / XTX (gfx1100), RX 9070 / AI PRO R9700 "
              "(gfx1201), and Strix Halo / Gorgon Halo, Radeon 8050S / 8060S / 8065S (gfx1151); experimental, not "
@@ -1336,7 +1336,7 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
         except ValueError:
             fail(f"--gpus takes GPU numbers as --check shows them, e.g. --gpus 0,1, not {a.gpus!r}")
         if not 2 <= len(want) <= MAX_GPUS or len(set(want)) != len(want):
-            fail("Maya's HIP port runs on one GPU or splits the model across two or more: --gpu 0, or --gpus 0,1,2,3")
+            fail("Kestrel's HIP port runs on one GPU or splits the model across two or more: --gpu 0, or --gpus 0,1,2,3")
         picked = [next((g for g in usable if g["index"] == i), None) for i in want]
         for i, g in zip(want, picked):
             if g is None:
@@ -1363,11 +1363,11 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
                  f"fails on that GPU - {cmdline(rocm_pip(g['arch'] for g in chosen))}")
         if hip_clang(root) is None or not (list(root.glob("lib/hipblas*.lib")) or list(bindir.glob("hipblas*.dll"))):
             fail(f"ROCm's HIP compiler and hipBLAS are not in {root}",
-                 f"install AMD's ROCm SDK into Maya's .venv: {cmdline(rocm_pip(g['arch'] for g in chosen))} - or set "
+                 f"install AMD's ROCm SDK into Kestrel's .venv: {cmdline(rocm_pip(g['arch'] for g in chosen))} - or set "
                  "ROCM_PATH to the root of a ROCm 7 for Windows")
         hipcc = next((p for p in (bindir / "hipcc.exe", root / "bin" / "hipcc.exe") if p.exists()), None)
         if hipcc is not None and tool_version(str(hipcc)) < (7, 0):
-            fail("Maya's HIP port requires ROCm 7 or newer")
+            fail("Kestrel's HIP port requires ROCm 7 or newer")
     else:
         root = Path(os.environ.get("ROCM_PATH") or "/opt/rocm")
         if not os.environ.get("ROCM_PATH") and not root.exists():
@@ -1386,7 +1386,7 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
             fail("ROCm's HIP compiler and hipBLAS are required", "install ROCm 7, or set ROCM_PATH to its root")
         if tool_version(str(root / "bin/hipcc")) < (7, 0):
             if os.environ.get("MAYA_HIP_ALLOW_ROCM6") != "1":
-                fail("Maya's HIP port requires ROCm 7 or newer",
+                fail("Kestrel's HIP port requires ROCm 7 or newer",
                      "or set MAYA_HIP_ALLOW_ROCM6=1 to try a ROCm 6.x (untested, e.g. a distribution's packages)")
             warn("ROCm older than 7 (MAYA_HIP_ALLOW_ROCM6=1): untested, the build or the engine may fail")
         if not shutil.which("c++"):
@@ -1432,7 +1432,7 @@ def check_hip_pc(a, installed=False, text_only=True) -> dict:
         ok("APU / unified memory: the engine sizes the GPU expert pool from available system RAM")
     unvalidated = sorted({g["arch"] for g in chosen if g["arch"] in HIP_ARCHS_UNVALIDATED})
     if unvalidated:
-        warn(f"{', '.join(unvalidated)} (RDNA 2) is experimental: it builds and has the portable kernels, but Maya has "
+        warn(f"{', '.join(unvalidated)} (RDNA 2) is experimental: it builds and has the portable kernels, but Kestrel has "
              "not been validated on such a card yet - please report how it goes in an issue "
              "(https://github.com/iTechMedic/project-maya/issues)")
     select_build_backend("hip")
@@ -1444,7 +1444,7 @@ def check_metal_pc(a) -> dict:
     """The Metal backend's PC check: macOS on Apple Silicon (its GPU always does Metal), the Xcode command line tools'
     C++ compiler, CMake, RAM and free disk.  Nothing asks nvidia-smi."""
     if not apple_silicon():
-        fail("Maya's Metal backend runs on macOS on Apple Silicon (an M-series Mac)",
+        fail("Kestrel's Metal backend runs on macOS on Apple Silicon (an M-series Mac)",
              "other PCs: --backend cuda (NVIDIA) or --backend hip (AMD)")
     if a.gpus or a.gpu is not None:
         warn("--gpu / --gpus do not apply on a Mac: the one Apple GPU is used")
@@ -1479,7 +1479,7 @@ def check_metal_pc(a) -> dict:
         for what, how in problems:
             say(f"  [X] {what}")
             say(f"      {how}")
-        fail("something Maya needs is missing (above)", f"install it and run {ME} again - the script installs nothing system-wide")
+        fail("something Kestrel needs is missing (above)", f"install it and run {ME} again - the script installs nothing system-wide")
     select_build_backend("metal")
     return {"backend": "metal", "gpus": [gpu]}
 
@@ -1558,7 +1558,7 @@ def choose_gpus(a, found, min_cc: int = MIN_CC, family: str = "") -> list:
         except ValueError:
             fail(f"--gpus takes GPU numbers as nvidia-smi numbers them, e.g. --gpus 0,1, not {a.gpus!r}")
         if not 1 <= len(want) <= MAX_GPUS or len(set(want)) != len(want):
-            fail(f"Maya runs on one GPU or splits the model's layers across up to {MAX_GPUS}: --gpu 0, or "
+            fail(f"Kestrel runs on one GPU or splits the model's layers across up to {MAX_GPUS}: --gpu 0, or "
                  "--gpus 0,1,2,3 (each number once)")
         for i in want:
             if i not in byid or int(byid[i]["arch"]) < min_cc:
@@ -1599,7 +1599,7 @@ def choose_gpus(a, found, min_cc: int = MIN_CC, family: str = "") -> list:
              ["DeepSeek-V4.1-Flash runs best on all of them: pairs of equal GPUs split each of their layers (tensor",
               "parallel), the pairs take the layers in turn, and the more VRAM, the fewer experts the CPU computes."]
              if min_cc >= DS4_MIN_CC else
-             ["Maya can run on one GPU, or split the model's layers across several: each then caches the experts "
+             ["Kestrel can run on one GPU, or split the model's layers across several: each then caches the experts "
               "of its", "own layers, so together they hold more of them (V100s: ~50 tok/s benchmark on two, ~24 "
               "on one)."])
     pick = choose("Which GPUs?", intro,
@@ -1631,14 +1631,14 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
         # (maya-hy4's AMD build: built and run on Linux - a Gorgon Halo's Radeon 8065S, and RX 7900 XT cards by its
         #  contributor; under Windows it builds as the other engines' HIP builds do, with Windows' own waits and memory
         #  rules, but no one has run it there yet: experimental, said once, and the setup goes on)
-        warn(f"{HY4} on an AMD GPU under Windows is experimental: Maya's team has not tested it there (it runs on "
+        warn(f"{HY4} on an AMD GPU under Windows is experimental: Kestrel's team has not tested it there (it runs on "
              "Linux) - if it does not start or its answers look wrong, docs/AMD_MAYA.md says how to report it and "
              "what to use instead")
     if a.backend == "hip":
         return check_hip_pc(a, text_only=not (mm3 or hy4))
     if a.backend == "metal":
         if family != "glm":
-            fail(f"Maya's setup runs GLM-5.3-Flash only on a Mac (not {ds4 and DS4 or mm3 and MM3 or hy4 and HY4 or QWEN_SHOWN})",
+            fail(f"Kestrel's setup runs GLM-5.3-Flash only on a Mac (not {ds4 and DS4 or mm3 and MM3 or hy4 and HY4 or QWEN_SHOWN})",
                  (f"{MM3} has an experimental Metal engine (maya-metal-mm3) that you build and start by hand: "
                   "see docs/METAL.md; " if mm3 else "")
                  + "other models: an NVIDIA or AMD GPU (--backend cuda / --backend hip)")
@@ -1647,15 +1647,15 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
         # the EXL3 quant's expert kernels are x86 (AVX2/AVX-512): neither this ARM nor this POWER CPU has them
         fail(f"{DS4}'s EXL3 quants need the x86 expert kernels (AVX2/AVX-512), which this {platform.machine()} CPU "
              "does not have",
-             f"set up one of Maya's GGUF quants instead: {ME} --setup --model deepseek-maya-s (or deepseek-maya-xs)")
+             f"set up one of Kestrel's GGUF quants instead: {ME} --setup --model deepseek-maya-s (or deepseek-maya-xs)")
     if not (WIN or sys.platform.startswith("linux")):
         fail("Kestrel runs on Linux and Windows (and on Apple Silicon: --backend metal)",
              "the engine needs an NVIDIA GPU and CUDA")
     min_cc = ((DS4_GGUF_MIN_CC if gguf else DS4_MIN_CC) if ds4 else (MM3_GGUF_MIN_CC if gguf else mm3_min_cc()) if mm3
               else QWEN_MIN_CC if family == "qwen" else HY4_MIN_CC if hy4 else MIN_CC)
     if S.is_wsl():
-        warn("this is WSL2, which Maya does not support: WSL2's driver pins only about 1 GB of "
-             "RAM for the GPU, and Maya's RAM tier pins tens of GB. Use a native Linux install.")
+        warn("this is WSL2, which Kestrel does not support: WSL2's driver pins only about 1 GB of "
+             "RAM for the GPU, and Kestrel's RAM tier pins tens of GB. Use a native Linux install.")
     found = S.gpus()
     if not found:
         fail("no NVIDIA GPU found (nvidia-smi did not answer)",
@@ -1699,7 +1699,7 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
                 "from RAM and the SSD - give it a try (more VRAM is faster; tell us your speed)")
     if min(archs) < VALIDATED_CC:
         warn("Pascal (compute capability 6.x) is experimental: the engine builds for it with its portable kernels "
-             "(the prompt attention on the F32 cores) and caches global loads in L1 there, but Maya has not been "
+             "(the prompt attention on the F32 cores) and caches global loads in L1 there, but Kestrel has not been "
              "validated on such a card yet - tell us how it goes in an issue")
     problems = []                                      # (what is wrong, how to fix it): all of them at once
 
@@ -1789,7 +1789,7 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
              "About > Advanced system settings > Performance > Advanced > Virtual memory - and restart")
     if oomd_active() and (ds4 or mm3 or total >= 128):
         warn("systemd-oomd is running: while a large RAM tier loads (the page cache reclaimed for minutes), it can "
-             "end the terminal's whole session - Maya, the setup's own tuning - with nothing in dmesg (issue #497: "
+             "end the terminal's whole session - Kestrel, the setup's own tuning - with nothing in dmesg (issue #497: "
              "~200 GB of DeepSeek experts on stock Ubuntu 22.04, 'systemd-oomd killed ... processes' in the journal). "
              "Stop it for the run (sudo systemctl stop systemd-oomd) or exempt your session: docs/SETUP.md, "
              "'Linux: systemd-oomd'")
@@ -1807,7 +1807,7 @@ def check_pc(a, family: str = "glm", gguf: bool = False, ds4_quant: str = "exl3"
         for what, how in problems:
             say(f"  [X]  {what}")
             say(f"       {how}")
-        fail("something Maya needs is missing (above)",
+        fail("something Kestrel needs is missing (above)",
              f"install it and run {ME} again - this script installs nothing system-wide")
     select_build_backend("cuda")
     return {"backend": "cuda", "gpus": chosen, "archs": archs, "nvcc": nvcc,
@@ -2023,7 +2023,7 @@ def choose_family(a, prev: dict) -> str:
     if default == "hy4" or hy4s or q4:
         rows.append((HY4, None,
                      "Tencent's Hy4-flash (220B with its n-gram tables; 512 experts, 16 a token) on its own engine"
-                     + (", in Maya's own GGUF quants: " +
+                     + (", in Kestrel's own GGUF quants: " +
                         ", ".join(f"{HY4_QUANTS[k]} ({hy4_entry(k)['download_gb']:.0f} GB)" for k in hy4s)
                         if hy4s else "") +
                      "; NVIDIA from V100 on, Linux or Windows, or AMD on Linux (Strix Halo / Gorgon Halo, Radeon "
@@ -2301,7 +2301,7 @@ def glm_fit_gate(a, quant: str, pc: dict | None, used: dict | None = None) -> di
         t = v["at"]
         warn(f"{Q.shown('glm', quant)} will run slowly on this PC's {glm_fit_card_name(v['card'])}: the card has "
              f"about {t['have'] / 1024:.1f} GB free and holding the model's experts takes about "
-             f"{t['need'] / 1024:.1f} GB, so Maya starts without an expert pool - the experts stay in RAM and are "
+             f"{t['need'] / 1024:.1f} GB, so Kestrel starts without an expert pool - the experts stay in RAM and are "
              "computed on the CPU. The answers are the same; writing and reading prompts are much slower than on a "
              "card that holds the experts"
              + ("; these GLM-5.3-Flash quants fit this card: " + ", ".join(Q.shown("glm", q) for q in others)
@@ -2682,9 +2682,9 @@ def compile_engine(archs, gpu_ids, nvcc, host_compiler, llama: Path, src: str, s
         if soft:
             # (not the engine compiled before: it is from the older source, and this version's server and config
             #  start it with settings it may not know or silently ignore - #805, on NVIDIA as on AMD)
-            fail("Maya's NVIDIA engine changed with this update, and " + msg + ": the engine from before does not "
+            fail("Kestrel's NVIDIA engine changed with this update, and " + msg + ": the engine from before does not "
                  "match this version, so it is not started",
-                 hint + "\n       fix the reason, then start Maya again (it compiles again)")
+                 hint + "\n       fix the reason, then start Kestrel again (it compiles again)")
         fail(msg, hint)
 
     cmake = pick_cmake()
@@ -2912,16 +2912,16 @@ def compile_engine_hip(pc: dict, llama: Path, src: str, soft=False, target: str 
     if not WIN and root == Path("/usr"):   # a distribution's ROCm: CMake's HIP check looks for hip-lang under this root
         conf.append(f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root.as_posix()}")
     jobs = max(1, min(4, (os.cpu_count() or 4) // 2))
-    say("  Compiling Maya for AMD " + ", ".join(pc["archs"]) + " ...")
+    say("  Compiling Kestrel for AMD " + ", ".join(pc["archs"]) + " ...")
     vcvars = S.find_vcvars(cuda=False) if WIN else None
     if cmake_steps(conf, [cmake, "--build", str(BUILD), "--target", target, "-j", str(jobs)], env,
                    "build-maya-hip.bat", vcvars=vcvars):
         if soft:
             # (not the engine compiled before: it is from the older source, and this version's server and config
             #  start it with settings it may not know or silently ignore - #805's start failed that way)
-            fail("Maya's AMD engine changed with this update, and compiling it failed: the engine from before does "
+            fail("Kestrel's AMD engine changed with this update, and compiling it failed: the engine from before does "
                  "not match this version, so it is not started",
-                 "the compiler's reason is above - fix it, then start Maya again (it compiles again)" +
+                 "the compiler's reason is above - fix it, then start Kestrel again (it compiles again)" +
                  ("; build-maya-hip.bat > build-hip.txt 2>&1 runs the same build alone and keeps its output"
                   if WIN else "") +
                  (" - " + VS2026_HIP_HINT if vs_2026(vcvars) else ""))
@@ -2954,14 +2954,14 @@ def compile_engine_metal(llama: Path, src: str, soft=False) -> dict | None:
         conf += ["-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={ninja}"]
     conf += ["-S", str(ROOT), "-B", str(BUILD), "-DMAYA_ENABLE_METAL=ON", "-DMAYA_METAL_TESTS=OFF",
              f"-DMAYA_GGML_DIR={llama}", "-DCMAKE_BUILD_TYPE=Release"]
-    say("  Compiling Maya for Apple Silicon (Metal) ... (a few minutes first time)")
+    say("  Compiling Kestrel for Apple Silicon (Metal) ... (a few minutes first time)")
     if cmake_steps(conf, [cmake, "--build", str(BUILD), "--target", "maya-metal", "-j", str(os.cpu_count() or 4)],
                    dict(os.environ), ""):
         if soft:
             # (the engine from before would run under this version's server and config: not started - #805)
-            fail("Maya's Metal engine changed with this update, and compiling it failed: the engine from before does "
+            fail("Kestrel's Metal engine changed with this update, and compiling it failed: the engine from before does "
                  "not match this version, so it is not started",
-                 "the compiler's reason is above (no compiler: xcode-select --install) - fix it, then start Maya "
+                 "the compiler's reason is above (no compiler: xcode-select --install) - fix it, then start Kestrel "
                  "again (it compiles again)")
         fail("the Metal engine build failed", "see the compiler output above (no compiler: xcode-select --install)")
     meta = {"backend": "metal", "src": src, "llama": str(llama), "version": maya_version(),
@@ -3091,7 +3091,7 @@ def refresh_engine(cfg: dict) -> None:
         llama = Path(meta.get("llama") or ROOT / "third_party/llama.cpp")
         if hip_clang(root) is None or not (llama / "ggml/CMakeLists.txt").exists():
             # (the engine from before would run under this version's server and config: not started - #805)
-            fail(f"Maya's AMD engine changed with this update, but the HIP compiler ({root}) or llama.cpp's source "
+            fail(f"Kestrel's AMD engine changed with this update, but the HIP compiler ({root}) or llama.cpp's source "
                  f"({llama}) it was compiled with is gone: the engine from before does not match this version, so it "
                  "is not started",
                  f"{ME} --setup --rebuild finds the compiler and compiles the engine again")
@@ -3105,7 +3105,7 @@ def refresh_engine(cfg: dict) -> None:
         llama = Path(meta.get("llama") or ROOT / "third_party/llama.cpp")
         if not (llama / "ggml/CMakeLists.txt").exists():
             # (the engine from before would run under this version's server and config: not started - #805)
-            fail(f"Maya's Metal engine changed with this update, but llama.cpp's source ({llama}) it was compiled "
+            fail(f"Kestrel's Metal engine changed with this update, but llama.cpp's source ({llama}) it was compiled "
                  "with is gone: the engine from before does not match this version, so it is not started",
                  f"{ME} --setup --rebuild fetches it and compiles the engine again")
         compile_engine_metal(llama, src, soft=True)
@@ -3114,7 +3114,7 @@ def refresh_engine(cfg: dict) -> None:
     nvcc, llama = meta.get("nvcc"), Path(meta.get("llama") or ROOT / "third_party" / "llama.cpp")
     if not nvcc or not Path(nvcc).exists() or not (llama / "ggml" / "CMakeLists.txt").exists():
         # (the engine from before would run under this version's server and config: not started - #805)
-        fail(f"Maya's NVIDIA engine changed with this update, but the CUDA compiler ({nvcc}) or llama.cpp's source "
+        fail(f"Kestrel's NVIDIA engine changed with this update, but the CUDA compiler ({nvcc}) or llama.cpp's source "
              f"({llama}) it was compiled with is gone: the engine from before does not match this version, so it is "
              "not started",
              f"{ME} --setup --rebuild finds the compiler and compiles the engine again")
@@ -3368,11 +3368,11 @@ def import_model(a, folder: str) -> int:
               Path(inst["models_dir"]) if inst.get("models_dir") else
               Path(inst["data_dir"]) / "models" if inst.get("data_dir") else ROOT.parent / "Maya-data" / "models")
     cat = import_catalog(models)
-    say(f"  Looking in {src} for Maya's model files (by size and sha256, not by name); they go to {models}")
+    say(f"  Looking in {src} for Kestrel's model files (by size and sha256, not by name); they go to {models}")
     got = MI.find(src, cat, progress=say)
     placed, shared = MI.choose(got["found"])
     if not placed and not shared:
-        warn("none of the files there is one of Maya's published model files")
+        warn("none of the files there is one of Kestrel's published model files")
     for path, _, size, hits in placed:
         say(f"  found  {path.name}  ({size / 1e9:.2f} GB)  ->  {hits[0]['rel']}" +
             (f" (+{len(hits) - 1} more places)" if len(hits) > 1 else ""))
@@ -3664,7 +3664,7 @@ def model_step(a, models: Path, choice: tuple):
     if kind == "exl3":                                 # an EXL3 folder of your own (--model-dir): complete by its own index
         d, quant = what, what.name
         shards = exl3_folder_files(d, ("config.json", "tokenizer.json", "tokenizer_config.json"))
-        warn(f"{quant}: experimental - only {', '.join(MODELS)} has been measured with Maya (README.md)")
+        warn(f"{quant}: experimental - only {', '.join(MODELS)} has been measured with Kestrel (README.md)")
     elif kind == "local":
         shards, quant, d = shard_set(what), quant_of(what), what.parent
         for s in shards:
@@ -3672,7 +3672,7 @@ def model_step(a, models: Path, choice: tuple):
             if why:
                 fail(f"{s.name}: {why}", f"finish copying or downloading it, then run {ME} again")
         if quant not in glm_downloads():
-            warn(f"{quant}: experimental - only {', '.join(MODELS)} has been measured with Maya (README.md)")
+            warn(f"{quant}: experimental - only {', '.join(MODELS)} has been measured with Kestrel (README.md)")
     else:
         quant = what
         m = glm_downloads()[quant]
@@ -4253,7 +4253,7 @@ def write_run_script(cfg_path: Path, port: int) -> Path:
                           f'the same)\r\ncd /d "{ROOT}" || exit /b 1\r\n{cmdline(cmd)} %*\r\n', encoding="utf-8")
         return script
     script = ROOT / f"run-{cfg_path.stem}.sh"
-    script.write_text("#!/bin/sh\n# starts the Kestrel dashboard and API (written by maya.py; ./maya.sh does the "
+    script.write_text("#!/bin/sh\n# starts the Kestrel dashboard and API (written by maya.py; ./kestrel.sh does the "
                       "same)\ncd " + shlex.quote(str(ROOT)) + " || exit 1\nexec " + shlex.join(cmd) + ' "$@"\n',
                       encoding="utf-8")
     script.chmod(0o755)
@@ -4849,7 +4849,7 @@ def busy_skip(cfg: dict, asked: bool, name: str, gpus: str, tail: str) -> bool:
     if asked:
         engines = maya_engines_on(cfg)
         if engines:
-            warn(f"{name} needs {gpus} to itself: {used} - another Maya model is loaded there (" +
+            warn(f"{name} needs {gpus} to itself: {used} - another Kestrel model is loaded there (" +
                  ", ".join(f"{exe} on GPU {i}, PID {pid}" for i, exe, pid in engines) + "): stop it, then ask again")
             return True
         if any(m > DISPLAY_MIB for _, m in busy):
@@ -4885,10 +4885,10 @@ def calibrate_config(cfg_path: Path) -> bool:
         warn("the tuning measures the CUDA engine's CPU lane: it does not apply to the Metal engine")
         return False
     if busy_skip(cfg, True, "the tuning", "the GPU(s)",          # (always asked for: --calibrate, or a yes at the setup)
-                 " (a model server still running?) - stop it, then run ./maya.sh --calibrate"):
+                 " (a model server still running?) - stop it, then run ./kestrel.sh --calibrate"):
         return False
     say()
-    say("  Tuning Maya for this PC: the output speed is measured with a few splits of the work between the CPU and")
+    say("  Tuning Kestrel for this PC: the output speed is measured with a few splits of the work between the CPU and")
     if G53.config_is_glm_dsa(cfg):                     # (GLM-5.3, 744B: a longer load, slower answers)
         say(f"  the PCIe link, and with fewer and more CPU threads. On {G53.SHOWN} it takes about {G53.CALIBRATE_MINUTES}")
         say("  minutes (the model loads first); the PC is busy meanwhile.")
@@ -4941,7 +4941,7 @@ def calibrate_ds4_config(cfg_path: Path) -> bool:
     into CAL_STORE for this PC, quant and context (a setup again applies them where the config before had none)."""
     cfg = read_json(cfg_path)
     if busy_skip(cfg, True, "the tuning", "the GPU(s)",          # (always asked for: --calibrate, or a yes at the setup)
-                 " (a model server still running?) - stop it, then run ./maya.sh --calibrate"):
+                 " (a model server still running?) - stop it, then run ./kestrel.sh --calibrate"):
         return False
     found = {g["index"]: g for g in S.gpus() or []}
     vram = [found[i]["vram_gb"] for i in cfg.get("gpu") or [] if i in found]
@@ -5197,7 +5197,7 @@ def speed_calibration(cfg_path: Path, why: str = "") -> bool:
             warn(f"no speed calibration for {HY4} yet: it drafts with its MTP block unless set up with --drafting off "
                  f"({ME} --setup --model hy4-flash-q4_k_m --drafting on|off)")
         else:
-            ok(f"{HY4}: no speed calibration here - a Maya size measures which drafter is faster where the MTP block "
+            ok(f"{HY4}: no speed calibration here - a Kestrel size measures which drafter is faster where the MTP block "
                f"and the DFly2 drafter both fit; here the setup found room for one of them or none ({ME} --setup "
                "--drafting on|off|mtp|dfly2)")
             inst, env = cfg.setdefault("installer", {}), cfg.get("env") or {}
@@ -5239,7 +5239,7 @@ def speed_calibration(cfg_path: Path, why: str = "") -> bool:
     say()
     say("  Speed calibration: DFlash2 or " + other + "?" + (f" ({why})" if why else ""))
     say("  DFlash2 makes some PCs faster and others slower: it depends on how much of the model fits in the GPUs'")
-    say("  memory, and on the CPU and the RAM. So Maya measures both here, the way you will use it. It loads the")
+    say("  memory, and on the CPU and the RAM. So Kestrel measures both here, the way you will use it. It loads the")
     say(f"  model twice ({other}, then DFlash2); each time it reads a long document, writes about {CD.MIN_TOKENS} "
         "tokens")
     say("  of answers after a warm-up, and the sustained speeds are compared. About 5-20 minutes; the PC is busy.")
@@ -5249,7 +5249,7 @@ def speed_calibration(cfg_path: Path, why: str = "") -> bool:
         res = CD.run(without, with_d, say=say, other_label=other)
     except Exception as e:                             # never stops a setup or a start: the config stays as it was
         now = "DFlash2" if "--dflash" in (cfg.get("args") or [])[:-1] else other
-        warn(f"the speed calibration did not finish ({e}): nothing changed - Maya keeps {now}; "
+        warn(f"the speed calibration did not finish ({e}): nothing changed - Kestrel keeps {now}; "
              f"{ME} --speed-calibration tries again")
         why_not = CAL.engine_error(log, since)
         if why_not:
@@ -5270,10 +5270,10 @@ def speed_calibration(cfg_path: Path, why: str = "") -> bool:
     say()
     if keep:
         ok(f"speed calibration: DFlash2 is faster on this PC - {d:.1f} against {o:.1f} tokens/s with {other} "
-           f"(+{res['gain'] * 100:.0f}%): Maya drafts with DFlash2")
+           f"(+{res['gain'] * 100:.0f}%): Kestrel drafts with DFlash2")
     else:
         ok(f"speed calibration: DFlash2 is not faster on this PC - {d:.1f} against {o:.1f} tokens/s with {other}: "
-           "Maya " + ("decodes without drafting" if one else "drafts with the MTP block"))
+           "Kestrel " + ("decodes without drafting" if one else "drafts with the MTP block"))
         say(f"       (saved in {cfg_path.name}; to draft with DFlash2 anyway: {ME} --setup --draft dflash2 "
             "--no-speed-calibration)")
     return True
@@ -5311,7 +5311,7 @@ def speed_calibration_hy4(cfg_path: Path, cfg: dict, why: str = "") -> bool:
     say()
     say("  Speed calibration: the MTP block or the DFly2 drafter?" + (f" ({why})" if why else ""))
     say("  Both fit on this GPU and the model checks every drafted token; which drafts faster depends on how much of")
-    say(f"  the model the GPU holds beside it. Maya loads the model twice (the MTP block, then DFly2); each time it "
+    say(f"  the model the GPU holds beside it. Kestrel loads the model twice (the MTP block, then DFly2); each time it "
         f"writes about {HY4_DRAFT_PROBE['tokens']} tokens of")
     say("  short answers (code, an explanation, plain text, thinking) after a warm-up, and the speeds are compared.")
     say("  The PC is busy meanwhile.")
@@ -5321,7 +5321,7 @@ def speed_calibration_hy4(cfg_path: Path, cfg: dict, why: str = "") -> bool:
     try:
         res = CD.run(mtp, dfly, say=say, other_label="the MTP block", draft_label="DFly2", size=HY4_DRAFT_PROBE)
     except Exception as e:                             # never stops a setup or a start: the config stays as it was
-        warn(f"the speed calibration did not finish ({e}): nothing changed - Maya keeps "
+        warn(f"the speed calibration did not finish ({e}): nothing changed - Kestrel keeps "
              f"{'DFly2' if now == 'dfly2' else 'the MTP block'}; {ME} --speed-calibration tries again")
         why_not = CAL.engine_error(log, since)
         if why_not:
@@ -5339,7 +5339,7 @@ def speed_calibration_hy4(cfg_path: Path, cfg: dict, why: str = "") -> bool:
         "tokens": [res["other"]["tokens"], res["dflash2"]["tokens"]], "kept": keep}
     cfg_path.write_text(json.dumps(N.env_out(out), indent=1), encoding="utf-8")
     say()
-    ok(f"speed calibration: {d:.1f} tokens/s with DFly2 against {o:.1f} with the MTP block - Maya drafts with " +
+    ok(f"speed calibration: {d:.1f} tokens/s with DFly2 against {o:.1f} with the MTP block - Kestrel drafts with " +
        ("DFly2" if keep == "dfly2" else "the MTP block") + (" (a tie: this size's default)" if tie else ""))
     say(f"       (saved in {cfg_path.name}; {ME} --speed-calibration measures again, --setup --drafting mtp|dfly2 "
         "picks one by hand)")
@@ -5371,7 +5371,7 @@ def speed_calibration_g53(cfg_path: Path, cfg: dict, why: str = "") -> bool:
     say()
     say("  Speed calibration: drafting with the MTP block on this GPU, or not?" + (f" ({why})" if why else ""))
     say("  The model checks every drafted token; whether drafting is faster depends on how much of the model the GPU holds.")
-    say(f"  Maya loads the model twice (no drafting, then drafting); each time it writes about "
+    say(f"  Kestrel loads the model twice (no drafting, then drafting); each time it writes about "
         f"{G53_DRAFT_PROBE['tokens']} tokens of")
     say("  short answers (code, an explanation, plain text, thinking) after a warm-up, and the speeds are compared.")
     say("  The PC is busy meanwhile.")
@@ -5380,7 +5380,7 @@ def speed_calibration_g53(cfg_path: Path, cfg: dict, why: str = "") -> bool:
     try:
         res = CD.run(off, on, say=say, other_label="no drafting", draft_label="drafting", size=G53_DRAFT_PROBE)
     except Exception as e:                             # never stops a setup or a start: the config stays as it was
-        warn(f"the speed calibration did not finish ({e}): nothing changed - Maya keeps drafting "
+        warn(f"the speed calibration did not finish ({e}): nothing changed - Kestrel keeps drafting "
              f"{'on' if fallback else 'off'}; {ME} --speed-calibration tries again")
         why_not = CAL.engine_error(log, since)
         if why_not:
@@ -5398,7 +5398,7 @@ def speed_calibration_g53(cfg_path: Path, cfg: dict, why: str = "") -> bool:
         "kept": "mtp" if keep else "none"}
     cfg_path.write_text(json.dumps(N.env_out(out), indent=1), encoding="utf-8")
     say()
-    ok(f"speed calibration: {d:.1f} tokens/s drafting against {o:.1f} without - Maya " +
+    ok(f"speed calibration: {d:.1f} tokens/s drafting against {o:.1f} without - Kestrel " +
        ("drafts with the MTP block on this GPU" if keep else "decodes without drafting") +
        (" (a tie: the default for this PC)" if abs(d - o) <= G53_DRAFT_TIE * max(o, d) else ""))
     say(f"       (saved in {cfg_path.name}; {ME} --speed-calibration measures again)")
@@ -5555,9 +5555,9 @@ def link_calibration(cfg_path: Path, why: str = "") -> bool:
     say("  Speed check: this PC has an NVIDIA card beside the AMD GPU - is the model faster on both?" +
         (f" ({why})" if why else ""))
     if glm:
-        say("  Maya loads the model twice (the AMD GPU alone, then both GPUs) and compares the decode speed.")
+        say("  Kestrel loads the model twice (the AMD GPU alone, then both GPUs) and compares the decode speed.")
     else:
-        say("  Maya loads the model twice (the AMD GPU alone, then both GPUs); each time it reads two documents and")
+        say("  Kestrel loads the model twice (the AMD GPU alone, then both GPUs); each time it reads two documents and")
         say("  writes a fixed answer to each, and both speeds - reading and writing - are compared.")
     put_back = (lambda: None) if glm else ds4_learned_kept(cfg)
     try:
@@ -5590,10 +5590,10 @@ def link_calibration(cfg_path: Path, why: str = "") -> bool:
         say()
         ok(f"speed check: on both GPUs it reads {rd:.0f} tokens/s and writes {d:.1f}, on the AMD GPU alone {ro:.0f} "
            f"and {o:.1f} ({100.0 * res['gain']:+.0f}% over both) - " +
-           ("Maya runs on both GPUs (--mixed-gpus off turns it off)" if cfg["mixed_gpus"] else
-            "both GPUs are available, off until their answers are verified: Maya stays on the AMD GPU alone "
+           ("Kestrel runs on both GPUs (--mixed-gpus off turns it off)" if cfg["mixed_gpus"] else
+            "both GPUs are available, off until their answers are verified: Kestrel stays on the AMD GPU alone "
             "(--mixed-gpus on turns both on)" if faster else
-            "Maya stays on the AMD GPU alone (--mixed-gpus on turns both on)"))
+            "Kestrel stays on the AMD GPU alone (--mixed-gpus on turns both on)"))
         return True
     o, d = res["other"]["tok_s"], res["dflash2"]["tok_s"]
     cfg["mixed_gpus"] = d > o * (1 + LINK_TIE)
@@ -5611,8 +5611,8 @@ def link_calibration(cfg_path: Path, why: str = "") -> bool:
     cfg_path.write_text(json.dumps(N.env_out(cfg), indent=1), encoding="utf-8")
     say()
     ok(f"speed check: {d:.1f} tokens/s on both GPUs against {o:.1f} on the AMD GPU alone - " +
-       ("Maya runs on both GPUs (--mixed-gpus off turns it off)" if cfg["mixed_gpus"] else
-        "Maya stays on the AMD GPU alone (--mixed-gpus on turns both on)"))
+       ("Kestrel runs on both GPUs (--mixed-gpus off turns it off)" if cfg["mixed_gpus"] else
+        "Kestrel stays on the AMD GPU alone (--mixed-gpus on turns both on)"))
     return True
 
 
@@ -5681,7 +5681,7 @@ def speed_calibration_ds4(cfg_path: Path, cfg: dict, why: str = "") -> bool:
     say()
     say("  Speed calibration: the DSpark drafter or none?" + (f" ({why})" if why else ""))
     say("  Drafting makes some PCs faster and others slower: it depends on how much of the model fits in the GPUs'")
-    say("  memory, and on the CPU, the RAM and the SSD. So Maya measures both here, the way you will use it. It loads")
+    say("  memory, and on the CPU, the RAM and the SSD. So Kestrel measures both here, the way you will use it. It loads")
     say(f"  the model twice; each time it warms up, then writes about {CDS.MIN_TOKENS} tokens of chat, code and tool")
     say("  calls alike (drafting pays most on code), and the combined speeds are compared. About 10-30 minutes; the")
     say("  PC is busy.")
@@ -5713,10 +5713,10 @@ def speed_calibration_ds4(cfg_path: Path, cfg: dict, why: str = "") -> bool:
                      for k, name, _, _ in CDS.KINDS if k in (res["dspark"].get("kinds") or {}))
     if keep:
         ok(f"speed calibration: the DSpark drafter is faster on this PC - {d:.1f} against {o:.1f} tokens/s "
-           f"(+{res['gain'] * 100:.0f}%, chat, code and tool calls combined): Maya drafts with it")
+           f"(+{res['gain'] * 100:.0f}%, chat, code and tool calls combined): Kestrel drafts with it")
     else:
         ok(f"speed calibration: the DSpark drafter is not faster on this PC - {d:.1f} against {o:.1f} tokens/s "
-           "(chat, code and tool calls combined): Maya decodes without drafting (and its memory holds more of the "
+           "(chat, code and tool calls combined): Kestrel decodes without drafting (and its memory holds more of the "
            "model)")
     if each:
         say(f"       (each kind with the drafter against without: {each} tokens/s)")
@@ -5800,7 +5800,7 @@ def drafting_choice(a, drafter: str, minutes: str) -> str:
     if getattr(a, "no_speed_calibration", False):
         return "on"
     say()
-    say(f"  {drafter}: Maya can measure on this PC whether drafting makes answers faster ({minutes} minutes, the")
+    say(f"  {drafter}: Kestrel can measure on this PC whether drafting makes answers faster ({minutes} minutes, the")
     say("  model loaded twice), or you choose now and skip the measuring.")
     r = ask("  m = measure, y = draft with it, n = no drafting (m/y/n)", ["m", "y", "n"], "m", a.yes)
     return {"m": "measure", "y": "on", "n": "off"}[r]
@@ -5817,7 +5817,7 @@ def keep_drafting(cfg_path: Path, on: bool) -> None:
                                                                 "version": maya_version(), "skipped": "chosen",
                                                                 "kept": "mtp" if on else "none"}
         cfg_path.write_text(json.dumps(N.env_out(out), indent=1), encoding="utf-8")
-        ok("speed calibration skipped: Maya " + ("drafts with the MTP block on this GPU" if on else
+        ok("speed calibration skipped: Kestrel " + ("drafts with the MTP block on this GPU" if on else
                                                  "decodes without drafting") + ", as chosen")
         say(f"       ({ME} --speed-calibration measures which is faster on this PC any time)")
         return
@@ -5834,7 +5834,7 @@ def keep_drafting(cfg_path: Path, on: bool) -> None:
         cfg.setdefault("installer", {})["mtp_calibration"] = {"date": time.strftime("%Y-%m-%d %H:%M"),
                                                                "skipped": "chosen", "kept": "mtp" if on else "none"}
         cfg_path.write_text(json.dumps(N.env_out(cfg), indent=1), encoding="utf-8")
-        ok(f"speed calibration skipped: Maya {'drafts with the MTP drafter' if on else 'decodes without drafting'}, "
+        ok(f"speed calibration skipped: Kestrel {'drafts with the MTP drafter' if on else 'decodes without drafting'}, "
            "as chosen")
         return
     if ds4:
@@ -5848,12 +5848,12 @@ def keep_drafting(cfg_path: Path, on: bool) -> None:
     cfg_path.write_text(json.dumps(N.env_out(out), indent=1), encoding="utf-8")
     name = "the DSpark drafter" if ds4 else "DFlash2"
     if on:
-        ok(f"speed calibration skipped: Maya drafts with {name}, as chosen")
+        ok(f"speed calibration skipped: Kestrel drafts with {name}, as chosen")
     elif ds4:
-        ok("speed calibration skipped: Maya decodes without drafting, as chosen")
+        ok("speed calibration skipped: Kestrel decodes without drafting, as chosen")
     else:
         one = len(cfg.get("gpu") or [0]) < 2
-        ok("speed calibration skipped: Maya " + ("decodes without drafting" if one else "drafts with the MTP block") +
+        ok("speed calibration skipped: Kestrel " + ("decodes without drafting" if one else "drafts with the MTP block") +
            ", as chosen")
     say(f"       ({ME} --speed-calibration measures which is faster on this PC any time)")
 
@@ -5873,7 +5873,7 @@ def server_command(cfg_path: Path, a) -> tuple:
     if renamed or old_env:
         cfg_path.write_text(json.dumps(N.env_out(cfg), indent=1), encoding="utf-8")
     if renamed:
-        ok(f"{cfg_path.name}: the programs are named after Maya now ({Path(cfg['exe']).name})")
+        ok(f"{cfg_path.name}: the programs are named after Kestrel now ({Path(cfg['exe']).name})")
     if getattr(a, "parallel", None):                   # --parallel given at a start: kept in the config
         set_arg(cfg.setdefault("args", []), "--parallel", a.parallel)
         cfg_path.write_text(json.dumps(N.env_out(cfg), indent=1), encoding="utf-8")
@@ -6075,7 +6075,7 @@ def serve_on_screen(cfg_path: Path, a) -> int:
     rc = S.UI.serve(cmd, env, info)
     if rc not in (0, UPDATE_EXIT, RESTART_EXIT):
         last = last_line(log, seen)
-        fail(f"Maya stopped: its server ended with exit code {rc}",
+        fail(f"Kestrel stopped: its server ended with exit code {rc}",
              (f"its engine's last line: {last} (the whole log: {log})" if last else "the reason is in its output")
              + f"; {ME} starts it again")
     return rc
@@ -6121,8 +6121,8 @@ def after_server(rc: int, a) -> int:
     say()
     say("  Updated from the dashboard: starting the new version ..." if rc != RESTART_EXIT else
         f"  Switching to {config.name} from the dashboard ..." if why == "switch" else
-        f"  {config.name}'s engine settings changed from the dashboard: starting Maya again with them ..."
-        if why == "settings" else "  The port changed from the dashboard: starting Maya again on it ...")
+        f"  {config.name}'s engine settings changed from the dashboard: starting Kestrel again with them ..."
+        if why == "settings" else "  The port changed from the dashboard: starting Kestrel again on it ...")
     sys.stdout.flush()
     if WIN:
         return subprocess.call(again)
@@ -6136,12 +6136,12 @@ def after_server(rc: int, a) -> int:
 REPORT_LINES = re.compile(r"glm fast:|glm prefill: (?:CUDA|HIP)|glm split|glm stat|glm slots|glm vram|ds4 serve: prompt read|glm prefill: \d|ERR|error|failed|"
                           r"out of memory|"
                           # maya-ds4's placement and speed lines (issue #416), not its loading progress
-                          r"^ds4: (?!copying experts |experts \d+ / |loading \d)|^ds4 (?:slots|cache):|^maya-ds4:|"
+                          r"^ds4: (?!copying experts |experts \d+ / |loading \d)|^ds4 (?:slots|cache):|^(?:maya|kestrel)-ds4:|"
                           r"^(?:prompt|decode): \d+ tokens in |^decode per token:|^decode (?:reads|left out)|^dspark|"
                           # maya-mm3's: where the model went (its --serve start) and each answer's prompt / decode speed
                           r"^maya-mm3:|^maya mm3 serve: (?:prompt|DSpark) |^maya-hy4:|"
                           # the Monitor's GPU readings: a reading that failed, a reader that stopped and why
-                          r"^\[maya\] (?:a GPU reading failed|the GPU readings)",
+                          r"^(?:\d\d:\d\d:\d\d )?\[(?:maya|kestrel)\] (?:a GPU reading failed|the GPU readings)",
                           re.I)
 STAT_DECODE = re.compile(r"glm stat: decode ([\d.]+) ms/tok")
 
@@ -6319,7 +6319,7 @@ def report(version: str, backend: str | None = None, cfg_path: Path | None = Non
             add(f"Engine log {log.name}: the speed and memory lines (last 80 of {len(picked)})", "\n".join(picked[-80:]))
             add(f"Engine log {log.name}: the last 25 lines", "\n".join(text[-25:]))
         else:
-            add(f"Engine log {log.name}", "not written yet (start Maya once and ask it something)")
+            add(f"Engine log {log.name}", "not written yet (start Kestrel once and ask it something)")
     bench_txt = ROOT / "maya-bench.txt"
     if bench_txt.exists():
         add("Benchmark (maya-bench.txt, from --bench)", bench_txt.read_text(encoding="utf-8", errors="replace"))
@@ -6328,7 +6328,7 @@ def report(version: str, backend: str | None = None, cfg_path: Path | None = Non
     say()
     ok(f"written: {out}")
     say("  Attach this file to your report (GitHub issue, X, or wherever you are asking). It has this PC's hardware,")
-    say("  your Maya setup and the engine's speed lines - no API key, and your home folder is shown as ~.")
+    say("  your Kestrel setup and the engine's speed lines - no API key, and your home folder is shown as ~.")
     say("  Best: run it right after a slow answer, so the log has that answer's numbers.")
     return 0
 
@@ -6412,7 +6412,7 @@ def bench(cfg_path: Path, version: str) -> int:
     port = cfg.get("port") or 8080
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)
-        fail(f"Maya is running (port {port}): the benchmark needs the GPU memory it holds",
+        fail(f"Kestrel is running (port {port}): the benchmark needs the GPU memory it holds",
              "stop it (Ctrl+C in its window), then run --bench again")
     except OSError:
         pass
@@ -6666,15 +6666,15 @@ def set_up(a, prev: dict) -> Path | None:
     if metal and a.calibrate:
         warn("--calibrate does not apply to Metal: there is no CPU lane to tune")
     if (a.calibrate and not metal) or (offer and ask(
-            "Tune Maya for this PC now? It measures the split of the work between the CPU and the PCIe link and the "
-            f"CPU threads (about {G53.CALIBRATE_MINUTES if dsa else '10-15'} minutes; later: ./maya.sh --calibrate)",
+            "Tune Kestrel for this PC now? It measures the split of the work between the CPU and the PCIe link and the "
+            f"CPU threads (about {G53.CALIBRATE_MINUTES if dsa else '10-15'} minutes; later: ./kestrel.sh --calibrate)",
             ["y", "n"], "y", a.yes) == "y"):
         if S.UI is not None:                           # (the screen lists the tuning as a step of its own)
-            S.UI.step(9, "tuning Maya for this PC")
+            S.UI.step(9, "tuning Kestrel for this PC")
         tuned = calibrate_config(cfg_path)
     if tuned is False:
         say()
-        warn("this PC is NOT tuned (the reason is above): ./maya.sh --calibrate tries again")
+        warn("this PC is NOT tuned (the reason is above): ./kestrel.sh --calibrate tries again")
     return cfg_path
 
 
@@ -6698,7 +6698,7 @@ def ds4_gguf_model(quant: str) -> dict:
             fail(f"{DS4_GGUF_MANIFEST} is missing or damaged", "restore it (git checkout tools/ds4/download_gguf.json)")
         about, repo, revision = (f"{ab.get('name', DS4 + '-abliterated')} {DS4_QUANTS[quant]}, orcarouter's abliterated "
                                  f"model as GGUFs ({q.get('about', 'the experts in 2-4 bits')}; its shard 2, the n-gram "
-                                 "table alone, left out: Maya's Q6_K tables are read instead)", ab["repo"],
+                                 "table alone, left out: Kestrel's Q6_K tables are read instead)", ab["repo"],
                                  ab["revision"])
         gated = bool(ab.get("gated"))
         q = dict(q, files={k: v for k, v in q["files"].items() if k != q.get("table")})
@@ -6708,7 +6708,7 @@ def ds4_gguf_model(quant: str) -> dict:
         if not q.get("files"):
             fail(f"{DS4} {DS4_QUANTS[quant]} is not published yet",
                  f"set up unsloth's GGUF meanwhile: {ME} --setup --model {DS4} --ds4-quant gguf-q8")
-        about, repo, revision = (f"{DS4} {DS4_QUANTS[quant]}, Maya's quant ({q.get('about', 'the experts in 2-3 bits')})",
+        about, repo, revision = (f"{DS4} {DS4_QUANTS[quant]}, Kestrel's quant ({q.get('about', 'the experts in 2-3 bits')})",
                                  my["repo"], my["revision"])
     else:
         q = (man.get("quants") or {}).get(DS4_QUANTS[quant]) or {}
@@ -6878,7 +6878,7 @@ def ds4_maya_drafter_model() -> dict | None:
         return None
     files = {Path(k).name: v for k, v in dr["files"].items()}
     return {"about": "the model's DSpark drafter (it drafts a few tokens at a time for the model to check: faster "
-                     "answers on PCs where that pays - measured after the setup), from Maya's repo: DeepSeek's FP4 "
+                     "answers on PCs where that pays - measured after the setup), from Kestrel's repo: DeepSeek's FP4 "
                      "experts, its dense weights in 8-bit", "format": "ds4-drafter", "repo": my["repo"],
             "revision": my["revision"], "folder": "dspark",
             "files": {k: v[0] for k, v in files.items()}, "sha256": {k: v[1] for k, v in files.items()},
@@ -7103,13 +7103,13 @@ def choose_ds4_quant(a, prev: dict) -> str:
     for k in ("exl3-3.5", "exl3-2.25"):   # (each one's whole download, from its own manifest)
         if k in keys:
             gb[k] = ds4_model(k)["download_gb"]
-    about = {"maya-s": "Maya's quant: experts in 2-3 bits, the most of it in memory",
-             "maya-m": "Maya's quant: experts in 3.4 bits, closer to the original",
-             "maya-xs": "Maya's smallest quant: experts in ~1.6 bits, the whole model in a 128 GB PC's memory",
+    about = {"maya-s": "Kestrel's quant: experts in 2-3 bits, the most of it in memory",
+             "maya-m": "Kestrel's quant: experts in 3.4 bits, closer to the original",
+             "maya-xs": "Kestrel's smallest quant: experts in ~1.6 bits, the whole model in a 128 GB PC's memory",
              "gguf-q8": ("unsloth's GGUF, the closest to the original model (DeepSeek's own formats: dense weights BF16, "
                          "experts MXFP4): KLD 0.047, 96.4% the same top token as the full-precision original (our scorer, "
                          "the same scale as the UD-IQ3_S and Maya-S numbers); about 306 GB of VRAM + RAM hold it, plus the "
-                         "203 GB of n-gram tables (MXFP8) read from the SSD - not shareable with Maya's Q6_K tables"),
+                         "203 GB of n-gram tables (MXFP8) read from the SSD - not shareable with Kestrel's Q6_K tables"),
              "gguf-q4": "unsloth's GGUF: dense weights Q8_0 (less VRAM), experts MXFP4",
              "exl3": "LibertAIDAI's quant, with the DSpark drafter and the vision tower",
              "exl3-3.5": f"closer to the original, slower: ~{DS4_EXL3['exl3-3.5']['memory_gb']} GB of VRAM + RAM "
@@ -7118,18 +7118,18 @@ def choose_ds4_quant(a, prev: dict) -> str:
                           "RAM hold it; with the DSpark drafter, and DeepSeek's own vision tower (0.97 GB, shared with "
                           "the GGUFs)",
              "abliterated-128g": "orcarouter's model with its refusals removed: experts ~1.6 bits, ~114 GB of VRAM + "
-                                 "RAM hold it; its 161 GB of n-gram tables are Maya's, shared with Maya's DeepSeek "
+                                 "RAM hold it; its 161 GB of n-gram tables are Kestrel's, shared with Kestrel's DeepSeek "
                                  "quants (downloaded once); a gated repo: your Hugging Face token",
              "abliterated-256g": "orcarouter's model with its refusals removed: experts 2.5-4.25 bits by layer (IQ2_S / "
                                  "IQ3_XXS / IQ3_S / MXFP4), ~236 GB of VRAM + RAM hold it; its 161 GB of n-gram tables are "
-                                 "Maya's, shared with Maya's DeepSeek quants (downloaded once); a gated repo: your "
+                                 "Kestrel's, shared with Kestrel's DeepSeek quants (downloaded once); a gated repo: your "
                                  "Hugging Face token"}
     for k in DS4_UD:   # (download_gguf.json's own words: the experts' and dense weights' types, the tables')
         q = ((read_json(DS4_GGUF_MANIFEST).get("quants") or {}).get(DS4_QUANTS[k]) or {})
         about[k] = f"unsloth's GGUF: {q.get('about', 'experts in 1.6-3.5 bits')}; ~{q.get('memory_gb', '?')} GB of VRAM + RAM hold it"
     about["gguf-iq1_m"] = ("unsloth's UD-IQ1_M: KLD 0.198 against the original, 90.3% the same top token (our scorer; "
                            "the same scale as the other KLD numbers here); about 140 GB of VRAM + RAM plus 110 GB of "
-                           "n-gram tables (IQ4_NL, not shareable with Maya's Q6_K tables) read from the SSD; for PCs "
+                           "n-gram tables (IQ4_NL, not shareable with Kestrel's Q6_K tables) read from the SSD; for PCs "
                            "with about 150 GB of VRAM + RAM")
     about["gguf-iq3_s"] = ("unsloth's UD-IQ3_S: close to Q8's quality (KLD 0.061 vs Q8's 0.047; Maya-S 0.119), about 262 GB of "
                            "VRAM + RAM plus the 161 GB n-gram tables read from the SSD; for PCs with about 270 GB or more of "
@@ -7256,7 +7256,7 @@ def ds4_abl_engram_step(a, d: Path, models: Path) -> Path | None:
         if whole(e, files):
             if not checked(files):
                 fail(f"{e}: the Engram tables do not match their published sha256", "delete them and run the setup again")
-            ok(f"the n-gram (Engram) tables: Maya's Q6_K, {e} ({sum(v[0] for v in files.values()) / 1e9:.1f} GB)")
+            ok(f"the n-gram (Engram) tables: Kestrel's Q6_K, {e} ({sum(v[0] for v in files.values()) / 1e9:.1f} GB)")
             return e
     for tier, files in pairs.items():   # (a Maya quant of DeepSeek beside it: its own pair, linked)
         src = next((h for h in ds4_table_homes(models) if h != e and whole(h, files)), None)
@@ -7280,11 +7280,11 @@ def ds4_abl_engram_step(a, d: Path, models: Path) -> Path | None:
             pass
         if not checked(files):
             fail(f"{src}: the Engram tables do not match their published sha256", "delete them and run the setup again")
-        ok(f"the n-gram (Engram) tables: Maya's Q6_K, linked from {src} (no second copy) into {e}")
+        ok(f"the n-gram (Engram) tables: Kestrel's Q6_K, linked from {src} (no second copy) into {e}")
         return e
     tier = eg.get("download", "Maya-XS")
     files = pairs[tier]
-    m = {"about": f"Maya's Q6_K n-gram (Engram) tables (DeepSeek's released ones; the two {tier} shards that hold them), "
+    m = {"about": f"Kestrel's Q6_K n-gram (Engram) tables (DeepSeek's released ones; the two {tier} shards that hold them), "
                   "read instead of orcarouter's own IQ4_NL table - one copy for both orcarouter versions",
          "format": "ds4-engram", "repo": my["repo"], "revision": my["revision"], "folder": tier,
          "files": {f: v[0] for f, v in files.items()}, "sha256": {f: v[1] for f, v in files.items()},
@@ -7294,7 +7294,7 @@ def ds4_abl_engram_step(a, d: Path, models: Path) -> Path | None:
         return None
     if not checked(files):
         fail(f"{e}: the Engram tables do not match their published sha256", "delete them and run the setup again")
-    ok(f"the n-gram (Engram) tables: Maya's Q6_K, {e}")
+    ok(f"the n-gram (Engram) tables: Kestrel's Q6_K, {e}")
     return e
 
 
@@ -7339,7 +7339,7 @@ def ds4_shared_tables(quant: str, d: Path, models: Path, m: dict) -> dict | None
                 if len(full) == len(names) and all(whole(where / n, v[0], v[1]) for n, v in full.items()):
                     return {"model": trimmed([table]), "without": [table], "src": {n: where / n for n in full},
                             "folder": d.parent / "Engram-Q6_K",
-                            "what": f"Maya's Q6_K n-gram tables ({tier}'s pair of shards, {where}) are read for "
+                            "what": f"Kestrel's Q6_K n-gram tables ({tier}'s pair of shards, {where}) are read for "
                                     f"{mine}'s too: its own table shard ({table}) is left out"}
         return None
     tier = mine                                          # a Maya quant, unsloth's shard there?
@@ -7357,7 +7357,7 @@ def ds4_shared_tables(quant: str, d: Path, models: Path, m: dict) -> dict | None
             if len(full) == len(onames) and all(whole(where / n, v[0], v[1]) for n, v in full.items()):
                 return {"model": trimmed(names), "without": names, "src": {n: where / n for n in full},
                         "folder": d.parent / "Engram-Q6_K",
-                        "what": f"Maya's Q6_K n-gram tables ({other}'s pair of shards, {where}) are read for {tier} too: "
+                        "what": f"Kestrel's Q6_K n-gram tables ({other}'s pair of shards, {where}) are read for {tier} too: "
                                 f"its own pair is left out"}
     for ud, v in uds.items():
         table = Path(v["table"]).name
@@ -7717,7 +7717,7 @@ def set_up_ds4(a, prev: dict) -> Path | None:
     gguf = quant not in DS4_EXL3
     pc = check_pc(a, "deepseek", gguf, quant)          # 1
     step(2, "your choices")                            # 2
-    ok(f"files: {Q.shown('deepseek', quant)}" + (" (Maya's quant)" if quant in DS4_MAYA else
+    ok(f"files: {Q.shown('deepseek', quant)}" + (" (Kestrel's quant)" if quant in DS4_MAYA else
                                                  " (a gated repo: your Hugging Face token)" if quant in DS4_ABL else
                                                  " (unsloth's GGUF)" if gguf else
                                                  f" ({DS4_EXL3[quant]['by']}'s EXL3 quant at {DS4_EXL3[quant]['bits']} bits)"))
@@ -7761,7 +7761,7 @@ def set_up_ds4(a, prev: dict) -> Path | None:
         own_table = None
     tabled = gguf and old is None and bool(own_table or quant == "maya-xs" or (quant in DS4_ABL and m.get("table")))
     if tabled and not ds4_abl_engram_there(d, models):  # (the tables follow: room for them too)
-        m = dict(m, also_gb=ds4_abl_engram_gb(), also_what="Maya's Q6_K n-gram tables, downloaded after it")
+        m = dict(m, also_gb=ds4_abl_engram_gb(), also_what="Kestrel's Q6_K n-gram tables, downloaded after it")
     files = ds4_model_step(a, d, old or m, announce=not look)             # 5
     if files is None:
         return None
@@ -7771,7 +7771,7 @@ def set_up_ds4(a, prev: dict) -> Path | None:
     without = [m["table"]] if quant in DS4_ABL and m.get("table") else [own_table] if own_table else None
     if without or (tabled and quant == "maya-xs"):     # (Maya's Q6_K tables; the quant's own table shard, if any, left out)
         if without and (d / without[0]).exists():
-            warn(f"{d / without[0]}: the n-gram table the model's publisher ships, not used - Maya's Q6_K tables are "
+            warn(f"{d / without[0]}: the n-gram table the model's publisher ships, not used - Kestrel's Q6_K tables are "
                  f"read instead; you can delete it ({(d / without[0]).stat().st_size / 1e9:.1f} GB)")
         engram = ds4_abl_engram_step(a, d, models)
         if engram is None:
@@ -7967,7 +7967,7 @@ def mm3_gguf_entry(quant: str) -> dict:
         fail(f"{MM3_GGUF_MANIFEST} is missing or damaged", "restore it (git checkout tools/mm3/download_gguf.json)")
     files = {Path(k).name: v for k, v in q["files"].items()}
     folder = Path(next(iter(q["files"]))).parent.as_posix()
-    return {"about": f"Maya's quant of {MM3} ({q.get('about', 'GGUF')})", "format": "mm3-gguf",
+    return {"about": f"Kestrel's quant of {MM3} ({q.get('about', 'GGUF')})", "format": "mm3-gguf",
             "repo": man["repo"], "revision": man.get("revision") or "", "folder": "" if folder == "." else folder,
             "files": {k: v[0] for k, v in files.items()}, "sha256": {k: v[1] for k, v in files.items()},
             "download_gb": sum(v[0] for v in files.values()) / 1e9, "memory_gb": q.get("memory_gb", MM3_MEMORY_GB),
@@ -8008,13 +8008,13 @@ def choose_mm3_quant(a, prev: dict) -> str:
         return keys[0]
     gb = {k: mm3_models()[0]["download_gb"] if k == "exl3" else mm3_gguf_entry(k)["download_gb"] for k in keys}
     about = {"exl3": f"Mia-AiLab's quant: pictures and DSpark drafting; ~{MM3_MEMORY_GB} GB of VRAM + RAM",
-             "gguf-xs": "Maya's quant: experts in ~1.6 bits, the whole model in a 128 GB PC's memory",
-             "gguf-s": "Maya's quant: experts in ~2.1 bits"}
+             "gguf-xs": "Kestrel's quant: experts in ~1.6 bits, the whole model in a 128 GB PC's memory",
+             "gguf-s": "Kestrel's quant: experts in ~2.1 bits"}
     pics = "; pictures and DSpark drafting (their files, ~4 GB, beside it)"
     label = {k: (Q.shown("minimax", k, gb[k]), about[k] + ("" if k == "exl3" else pics)) for k in keys}
     order = sorted(keys, key=lambda k: k != rec)
     default = before if before in order else rec
-    pick = choose(f"Which files of {MM3}?", ["Maya's GGUF quants and the EXL3 quant run on NVIDIA from V100 on and "
+    pick = choose(f"Which files of {MM3}?", ["Kestrel's GGUF quants and the EXL3 quant run on NVIDIA from V100 on and "
                                              "on AMD:"],
                   [(label[k][0], "recommended" if k == rec else None, label[k][1]) for k in order],
                   order.index(default), a.yes or a.check)
@@ -8342,7 +8342,7 @@ def set_up_mm3(a, prev: dict) -> Path | None:
         warn(f"{vram:.0f} GB of VRAM and {total:.0f} GB of RAM: below the ~{need:.0f} GB that hold all of {name} "
              "(the engine reads what does not fit from the SSD as the page cache allows - slower)")
     step(2, "your choices")                            # 2
-    ok(f"files: {name}" + (" (Maya's quant)" if gguf else " (your EXL3 folder)" if own else " (Mia-AiLab's EXL3 quant)"))
+    ok(f"files: {name}" + (" (Kestrel's quant)" if gguf else " (your EXL3 folder)" if own else " (Mia-AiLab's EXL3 quant)"))
     fmt = mm3_kv_format(prev_args)                     # (a setup again keeps the config's --kv-cache)
     par = getattr(a, "parallel", None) or int(flag_value(prev_args, "--parallel") or 1)   # (--parallel: kept)
     apu = apu_kind(pc["gpus"])
@@ -8517,7 +8517,7 @@ def hy4_entry(quant: str = HY4_Q4, layout: str = HY4_STANDARD) -> dict:
         if rev and lay.get("published") == "hub" else rev
     about = q.get("about", "GGUF") + (f"; {lay['about']}" if lay["about"] else "")
     m = {"about": (f"{HY4} in AngelSlim's GGUF ({about}); {q.get('license', 'the repo license applies')}" if q4 else
-                   f"Maya's quant of {HY4} ({about}); {man.get('license', 'Tencent Hy License')}"),
+                   f"Kestrel's quant of {HY4} ({about}); {man.get('license', 'Tencent Hy License')}"),
          "format": "hy4-gguf", "repo": repo, "revision": trunk_rev, "folder": "" if folder == "." else folder,
          "files": {k: v[0] for k, v in files.items()}, "sha256": {k: v[1] for k, v in files.items()},
          "ngram": nname, "ngram_gb": nfile[0] / 1e9, "download_gb": sum(v[0] for v in files.values()) / 1e9,
@@ -9128,13 +9128,13 @@ def choose_hy4_quant(a, prev: dict) -> str:
     order = sorted(keys, key=lambda k: k != rec) + others
     default = before if before in order else rec if rec in order else order[0]
     rows = [(Q.shown("hy4", k, m[k]["download_gb"]), "recommended" if k == rec else None,
-             f"Maya's quant: {hy4_quant_table(k).get('about', 'GGUF')}; " + hy4_for_pcs(k, m[k]["memory_gb"]))
+             f"Kestrel's quant: {hy4_quant_table(k).get('about', 'GGUF')}; " + hy4_for_pcs(k, m[k]["memory_gb"]))
             for k in order if k != HY4_Q4]
     rows += [(Q.shown("hy4", k, m[k]["download_gb"]), None,
               f"Tencent's own Q4_K_M (AngelSlim): {hy4_quant_table(k).get('about', 'GGUF')}; about "
               f"{m[k]['memory_gb']:.0f} GB of VRAM and RAM together; with MTP drafting - run on NVIDIA RTX 30 / A100 "
               "and newer, Linux") for k in others]
-    pick = choose(f"Which files of {HY4}?", ["Maya's GGUF quants of it, on NVIDIA from V100 on or AMD (Linux; Windows experimental), and "
+    pick = choose(f"Which files of {HY4}?", ["Kestrel's GGUF quants of it, on NVIDIA from V100 on or AMD (Linux; Windows experimental), and "
                                            "Tencent's own:"],
                   rows, order.index(default), a.yes or getattr(a, "check", False))
     return order[pick]
@@ -9711,7 +9711,7 @@ def hy4_fast_drafting_step(a, pc: dict, quant: str, fit: dict, before: bool = Fa
         return fit, None                               # (the default claims the drafter: nothing asked, nothing said)
     if want is None and not before:
         rows = [("Default: the cache in F16 rows, no drafting at this context", "recommended",
-                 "The answers as Maya's default writes them."),
+                 "The answers as Kestrel's default writes them."),
                 ("Faster drafting: the cache in 8-bit rows, so the DFly2 drafter fits", None,
                  f"Decoding is faster; {HY4_FAST_DRAFTING_SAID}.")]
         pick = choose("Faster drafting?",
@@ -9770,7 +9770,7 @@ def set_up_hy4(a, prev: dict) -> Path | None:
            "LICENSE and Tencent's terms for Hy4-flash apply)")
         if WIN or any(int(g.get("arch") or 0) < HY4_Q4_TESTED_CC for g in pc["gpus"]):
             warn("these files with their drafting have been run on Linux with NVIDIA RTX 30 / A100 and newer cards; "
-                 f"on this PC Maya's own sizes are the ones tested ({ME} --setup --model hy4-flash)")
+                 f"on this PC Kestrel's own sizes are the ones tested ({ME} --setup --model hy4-flash)")
         if total > 0 and vram + total < need:
             warn(f"{vram:.0f} GB of VRAM and {total:.0f} GB of RAM: below the ~{need:.0f} GB that hold all of {name} - "
                  "slower: parts of the model are then read from the SSD")
@@ -9792,7 +9792,7 @@ def set_up_hy4(a, prev: dict) -> Path | None:
            "drafting: off (--drafting on drafts with the model's MTP block)")
         fit = {"layout": HY4_STANDARD, "args": [], "context": ctx, "vision": True}
     else:
-        ok(f"files: {name} (Maya's quant)")
+        ok(f"files: {name} (Kestrel's quant)")
         fit = hy4_fit_step(a, pc, quant, prev_ctx, lambda lay: hy4_dir(a, models, prev, quant, lay))
         plain_fit = fit
         fit, fast_alt = hy4_fast_drafting_step(a, pc, quant, fit, same and bool(inst.get("fast_drafting")))
@@ -9912,7 +9912,7 @@ def set_up_hy4(a, prev: dict) -> Path | None:
         else:
             ok("drafting: Tencent's MTP block and DFly2 drafter both fit here - each drafts tokens the model checks, "
                "so only tokens the model itself would pick are written. " +
-               ("Maya measures now which is faster on this PC" if measure_now else
+               ("Kestrel measures now which is faster on this PC" if measure_now else
                 f"Until a speed calibration measures which is faster on this PC ({ME} --speed-calibration; "
                 "otherwise once, at the first start that is not unattended)" if "speed_calibration" not in extra else
                 "Not measured (--no-speed-calibration)") +
@@ -10321,7 +10321,7 @@ def choose_qwen_quant(a, prev: dict) -> str:
     for q in QWEN_QUANTS:
         m = qwen_entry(q)
         rows.append((Q.shown("qwen", q, m["download_gb"]), None,
-                     "Qwen3.8-Flash-Next itself in unsloth's UD-IQ2_XS GGUF (its n-gram table from Maya's repo, its MTP "
+                     "Qwen3.8-Flash-Next itself in unsloth's UD-IQ2_XS GGUF (its n-gram table from Kestrel's repo, its MTP "
                      f"head, the experts in about {m['memory_gb']:.0f} GB of VRAM and RAM together)" if q == QWEN_UD else
                      "Blackfrost-AI's cybersecurity fine-tune in peasantsmith's GGUF (Q5_K experts, all of them in about "
                      f"{m['memory_gb']:.0f} GB of VRAM and RAM together)"))
@@ -10415,7 +10415,7 @@ def model_option(a) -> str | None:
         return None
     hit = Q.resolve(a.model, list(glm_downloads()))   # (GLM-5.3's downloads included)
     if hit is None:
-        return (f"--model {a.model}: not a model Maya knows - one of " + ", ".join(i for _, _, _, i in Q.QUANTS) +
+        return (f"--model {a.model}: not a model Kestrel knows - one of " + ", ".join(i for _, _, _, i in Q.QUANTS) +
                 f", {DS4}, {MM3}, {HY4}, cyber-frost = {QWEN_SHOWN}, or a GLM-5.3-Flash download: " + ", ".join(MODELS))
     family, key = hit
     if family == "glm":
@@ -10455,7 +10455,7 @@ def main() -> int:
                     help="the setup in plain text, the answers typed (not on the setup's own screen)")
     ap.add_argument("--import-model", metavar="FOLDER",
                     help="use model files downloaded some other way (a download manager, a copy from another PC, a "
-                         "Hugging Face cache): finds Maya's published files in FOLDER by size and sha256 (any names, "
+                         "Hugging Face cache): finds Kestrel's published files in FOLDER by size and sha256 (any names, "
                          "any subfolders) and moves them into the models folder, or copies them with --copy when "
                          "they are on another drive")
     ap.add_argument("--copy", action="store_true",
@@ -10463,7 +10463,7 @@ def main() -> int:
     ap.add_argument("--download-model", action="store_true",
                     help="download the model without asking (the commands and the size are still printed)")
     ap.add_argument("--model", metavar="MODEL",
-                    help="which model and files (default: asked): a Maya quant - "
+                    help="which model and files (default: asked): a Kestrel quant - "
                          + ", ".join(i for _, _, _, i in Q.QUANTS) +
                          f" - or {DS4} / {MM3} / {HY4} (their files asked, or --ds4-quant / --mm3-quant / --hy4-quant), "
                          f"cyber-frost = {QWEN_SHOWN},"
@@ -10476,7 +10476,7 @@ def main() -> int:
                                         "and chat template are used); it must be writable - the pack is written inside "
                                         "it")
     ap.add_argument("--ds4-quant", choices=list(DS4_QUANTS) + [DS4_ABL_ALIAS],
-                    help=f"{DS4}'s files: maya-s = Maya's quant (the experts in 2-3 bits; the default once "
+                    help=f"{DS4}'s files: maya-s = Kestrel's quant (the experts in 2-3 bits; the default once "
                          "published; maya-m: 3.4 bits, once published; maya-xs: ~1.6 bits, with its own "
                          "2-bit drafter: the whole model in a 128 GB PC's memory), gguf-q8 = unsloth's UD-Q8_K_XL GGUF, gguf-q4 = its UD-Q4_K_XL "
                          "(dense weights Q8_0: less VRAM; chosen by hand only, not in the setup's list), gguf-iq1_s / gguf-iq1_m / "
@@ -10486,9 +10486,9 @@ def main() -> int:
                          f"quant at 2.25 bits (~{DS4_EXL3['exl3-2.25']['memory_gb']} GB of VRAM + RAM; all three V100 or "
                          "newer, or AMD); "
                          "abliterated-128g / abliterated-256g = orcarouter's abliterated model (its refusals removed) "
-                         "as its Mix-128G / Mix-256G GGUF (~114 / ~236 GB of VRAM + RAM, with Maya's Q6_K n-gram "
+                         "as its Mix-128G / Mix-256G GGUF (~114 / ~236 GB of VRAM + RAM, with Kestrel's Q6_K n-gram "
                          "tables; a gated repo: HF_TOKEN or `hf auth login`), abliterated = the one that fits this "
-                         "PC; a Maya "
+                         "PC; a Kestrel "
                          "quant also as --model deepseek-maya-s / -maya-m / -maya-xs")
     ap.add_argument("--mm3-quant", choices=list(MM3_QUANTS) + list(Q.MM3_QUANT_ALIASES),
                     help=f"{MM3}'s files: exl3 = Mia-AiLab's EXL3 quant at 3.5 bits (NVIDIA; pictures, DSpark), "
@@ -10497,7 +10497,7 @@ def main() -> int:
                          "from V100 on and on AMD; with --model-dir: the files you have (the same as --model "
                          "minimax-maya-xs / minimax-maya-s)")
     ap.add_argument("--hy4-quant", choices=list(HY4_QUANTS) + [HY4_Q4],
-                    help=f"{HY4}'s files, Maya's own GGUF quants of it (NVIDIA from V100 on, Linux or Windows; AMD on Linux, "
+                    help=f"{HY4}'s files, Kestrel's own GGUF quants of it (NVIDIA from V100 on, Linux or Windows; AMD on Linux, "
                          "and under Windows experimental): maya-xs = Hy4-Flash-Maya-XS (routed experts in 2 bits), maya-s / maya-m / "
                          "maya-l once they are published; q4_k_m = Tencent's own Q4_K_M from AngelSlim, with MTP "
                          "drafting (--drafting off: without; run on RTX 30 / A100 and newer, Linux); with "
@@ -10566,7 +10566,7 @@ def main() -> int:
                                                           "speed lines - to attach when you report a problem or a "
                                                           "speed (nothing is sent anywhere)")
     ap.add_argument("--bench", action="store_true", help="a standard speed test of the installed model (a few "
-                                                         "minutes, with Maya stopped): decode on three questions and "
+                                                         "minutes, with Kestrel stopped): decode on three questions and "
                                                          "prefill at 2k / 8k tokens; writes maya-bench.txt")
     ap.add_argument("--calibrate", action="store_true",
                     help="tune the engine's CPU lane for this PC (the PCIe share and the CPU threads, ~10-15 minutes; "
@@ -10588,7 +10588,7 @@ def main() -> int:
                          "drafter has no room beside the cache's F16 rows at the context chosen, on keeps that context "
                          "with the cache in 8-bit rows so the drafter fits - faster drafting (an 8 GB card at 8K: "
                          "decoding about +8-27%%), slightly different wording than the default; off = the default "
-                         "(F16 rows, Maya's default answers). Not given: asked where it applies (--yes: the default)")
+                         "(F16 rows, Kestrel's default answers). Not given: asked where it applies (--yes: the default)")
     ap.add_argument("--no-speed-calibration", action="store_true",
                     help="the same as --drafting on: draft with the drafter without measuring it")
     ap.add_argument("--config", type=Path, help="the installed JSON config to start (its run-maya-<model>.sh does), or "
@@ -10611,7 +10611,7 @@ def main() -> int:
     if not WIN and sys.prefix == sys.base_prefix and not os.environ.get("MAYA_SH"):
         # started as `python3 maya.py`: a system Python takes no pip installs (PEP 668, "externally-managed-
         # environment") - maya.sh makes the private .venv and runs this file with its Python
-        say("Starting through ./maya.sh, which runs Maya with its own Python environment (.venv) ...")
+        say("Starting through ./maya.sh, which runs Kestrel with its own Python environment (.venv) ...")
         sys.stdout.flush()
         os.execve("/bin/sh", ["/bin/sh", str(HERE / "maya.sh"), *sys.argv[1:]], dict(os.environ, MAYA_SH="1"))
     version = maya_version()
@@ -10625,7 +10625,7 @@ def main() -> int:
         if a.backend:
             have = [p for p in have if read_json(p).get("backend", "cuda") == a.backend]
         if not have:
-            fail("Maya is not set up here yet", f"run {ME} first")
+            fail("Kestrel is not set up here yet", f"run {ME} first")
         return bench(have[0], version)
 
     have = configs() if a.config is None else [a.config.resolve()]   # (--config: that one, no question)
@@ -10634,7 +10634,7 @@ def main() -> int:
     elif have:
         a.backend = read_json(have[0]).get("backend") if read_json(have[0]).get("backend") in ("hip", "metal") else "cuda"
     else:
-        # nothing set up yet (START-MAYA.bat / ./maya.sh without --backend): Metal on a Mac with Apple Silicon, HIP on
+        # nothing set up yet (START-KESTREL.bat / ./kestrel.sh without --backend): Metal on a Mac with Apple Silicon, HIP on
         # a PC with a supported AMD GPU and no NVIDIA one (e.g. Strix Halo)
         a.backend = first_run_backend()
     setting_up = a.setup or a.check or a.gguf_dir or a.model or a.model_dir or a.rebuild or a.repack or \
@@ -10711,13 +10711,13 @@ def main() -> int:
                 hy4_fit_step(a, pc, quant)
         say()
         if a.backend == "metal":
-            say(f"This Mac can run Maya on Metal (experimental). Run {ME} without --check to set it up.")
+            say(f"This Mac can run Kestrel on Metal (experimental). Run {ME} without --check to set it up.")
         elif a.backend == "hip":
             pick = (f"--gpus {','.join(str(g['index']) for g in pc['gpus'])}" if len(pc["gpus"]) > 1
                     else f"--gpu {pc['gpus'][0]['index']}")
             say(f"HIP prerequisites found. Run {ME} --backend hip {pick} to set it up.")
         else:
-            say(f"This PC can run Maya. Run {ME} without --check to set it up.")
+            say(f"This PC can run Kestrel. Run {ME} without --check to set it up.")
         return 0
     rc = None                                          # the server's exit code, when it ran on the setup's screen
     if setup_screen(a):

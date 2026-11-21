@@ -31,7 +31,7 @@ MAX_PAGES = 6             # a scanned PDF's pages per attachment: every one cost
 DPI = 100                 # (pdftoppm's own default: enough for the encoders, and a page is ~1 MB of PNG at it)
 TIMEOUT_S = 30            # one PDF is never worth holding the request worker longer than this
 NEED_POPPLER = ("poppler on this PC reads more PDFs (Ubuntu/Debian: sudo apt install poppler-utils; Arch: sudo pacman "
-                "-S poppler; macOS: brew install poppler; Windows: scoop install poppler), then restart Maya")
+                "-S poppler; macOS: brew install poppler; Windows: scoop install poppler), then restart Kestrel")
 
 
 def _run(tool: str, args: list[str]) -> subprocess.CompletedProcess | None:

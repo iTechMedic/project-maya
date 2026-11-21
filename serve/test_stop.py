@@ -240,7 +240,7 @@ class ServerStops(unittest.TestCase):
     def ended(self, p: Proc, why: str):
         self.assertEqual(p.p.wait(timeout=60), 0)
         out = p.rest()
-        self.assertIn(f"[maya] stopping ({why}): the engine ends", out)
+        self.assertIn(f"[kestrel] stopping ({why}): the engine ends", out)
         self.assertEqual(gone(self.engine), [], "the engine outlived the server")
 
     @unittest.skipUnless(FAKE_ENGINE, "the tokenizer's regex module")
@@ -321,7 +321,7 @@ class MayaStops(unittest.TestCase):
     def test_sigterm_to_maya_alone(self):
         self.maya.p.send_signal(signal.SIGTERM)
         self.assertEqual(self.maya.p.wait(timeout=60), 0)          # (it waited for the server, which ended well)
-        self.assertIn("[maya] stopping (the program that started it ended)", self.maya.rest())
+        self.assertIn("[kestrel] stopping (the program that started it ended)", self.maya.rest())
         self.assertEqual(gone(self.tree), [])
 
     @unittest.skipIf(WIN, "POSIX signals")
@@ -337,7 +337,7 @@ class MayaStops(unittest.TestCase):
         self.maya.p.wait(timeout=30)
         self.assertEqual(gone(self.tree), [])
         if not WIN:
-            self.assertIn("[maya] stopping (the program that started it ended)", self.maya.rest())
+            self.assertIn("[kestrel] stopping (the program that started it ended)", self.maya.rest())
 
 
 SCREEN = """

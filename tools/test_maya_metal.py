@@ -264,7 +264,7 @@ class MetalSetupTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 maya.compile_engine_metal(self.root / "llama.cpp", "abc", soft=True)
         self.assertIn("not started", stop.call_args.args[0])
-        self.assertIn("start Maya again", stop.call_args.args[1])
+        self.assertIn("start Kestrel again", stop.call_args.args[1])
 
     def test_refresh_without_llama_source_stops(self):
         maya.select_build_backend("metal")

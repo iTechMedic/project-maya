@@ -186,7 +186,7 @@ class Text(unittest.TestCase):
         self.assertIn("ZIP archive", ex("x.zip", _zip({"a.bin": b"\0\1"}))["error"]["message"])
         self.assertIn("audio", ex("x.mp3", b"ID3\x04" + bytes(100))["error"]["message"])
         m = ex("blob.dat", bytes(range(256)) * 8)["error"]["message"]
-        self.assertIn("not a kind of file Maya reads (.dat)", m)
+        self.assertIn("not a kind of file Kestrel reads (.dat)", m)
         self.assertIn("Word, Excel and PowerPoint", m)
 
     def test_empty_document_says_so(self):

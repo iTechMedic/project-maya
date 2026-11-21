@@ -151,7 +151,7 @@ class ModelOption(unittest.TestCase):
 
     def test_errors(self):
         why, _ = self.run_opt(model="Maya-XS")
-        self.assertIn("not a model Maya knows", why)
+        self.assertIn("not a model Kestrel knows", why)
         self.assertIn("minimax-maya-xs", why)
         why, _ = self.run_opt(model="minimax-maya-xs", mm3_quant="gguf-s")
         self.assertIn("give one of them", why)
@@ -163,7 +163,7 @@ class ModelOption(unittest.TestCase):
         r = subprocess.run([sys.executable, str(Path(maya.__file__)), "--model", "glm-maya-zz", "--check"],
                            capture_output=True, text=True, timeout=120, env=dict(maya.os.environ, MAYA_SH="1"))
         self.assertEqual(r.returncode, 2, r.stderr)
-        self.assertIn("not a model Maya knows", r.stderr)
+        self.assertIn("not a model Kestrel knows", r.stderr)
 
 
 def v1129_configs(root: Path) -> dict:

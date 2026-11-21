@@ -173,7 +173,7 @@ class Updating(unittest.TestCase):
 
     def test_not_started_by_maya_sh(self):
         del os.environ[U.SUPERVISED]
-        self.assertIn("setup.sh", self.u.info()["blocker"])
+        self.assertIn("kestrel.sh", self.u.info()["blocker"])
 
     def test_not_a_checkout(self):
         shutil.rmtree(self.clone / ".git", onerror=lambda f, p, e: (os.chmod(p, 0o700), f(p)))

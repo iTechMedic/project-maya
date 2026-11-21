@@ -133,7 +133,7 @@ class Updater:
     def blocker(self) -> str | None:
         """Why this install can't update itself from the page (None: it can)."""
         if not os.environ.get(SUPERVISED):
-            return "this server was not started by ./setup.sh or START-MAYA.bat, which start it again after an update"
+            return "this server was not started by ./kestrel.sh or START-KESTREL.bat, which start it again after an update"
         if not (self.root / ".git").exists():
             return "this folder is not a git checkout (it was downloaded as an archive)"
         try:
@@ -153,7 +153,7 @@ class Updater:
         return {"current": self.current, "enabled": self.enabled(), "latest": self.latest, "newer": newer,
                 "checked": self.checked or None, "error": self.error, "can_update": newer and why is None,
                 "blocker": why, "state": state,
-                "by_hand": ("git pull, then start Kestrel again (./setup.sh or START-MAYA.bat)" if (self.root / ".git").exists()
+                "by_hand": ("git pull, then start Kestrel again (./kestrel.sh or START-KESTREL.bat)" if (self.root / ".git").exists()
                             else "download the new release from GitHub into a new folder")}
 
     def busy(self) -> bool:

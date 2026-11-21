@@ -98,7 +98,7 @@ class _Zip:
             out = f.read(MEMBER_MAX + 1)
         self.read_total += len(out)
         if len(out) > MEMBER_MAX or self.read_total > TOTAL_MAX:
-            raise Unreadable("the document unpacks to more than Maya reads from one attachment")
+            raise Unreadable("the document unpacks to more than Kestrel reads from one attachment")
         return out
 
     def xml(self, name: str):
@@ -434,9 +434,9 @@ NOT_READ = (
     (b"\x1f\x8b", "a gzip archive", "attach the files inside it"),
     (b"MZ", "a Windows program", "attach its source or a text description"),
     (b"\x7fELF", "a Linux program", "attach its source or a text description"),
-    (b"ID3", "an audio file", "none of Maya's models hear audio - attach a transcript"),
-    (b"fLaC", "an audio file", "none of Maya's models hear audio - attach a transcript"),
-    (b"OggS", "an audio file", "none of Maya's models hear audio - attach a transcript"),
+    (b"ID3", "an audio file", "none of Kestrel's models hear audio - attach a transcript"),
+    (b"fLaC", "an audio file", "none of Kestrel's models hear audio - attach a transcript"),
+    (b"OggS", "an audio file", "none of Kestrel's models hear audio - attach a transcript"),
     (b"GGUF", "a model file", "it is not something a chat reads"),
 )
 
@@ -495,7 +495,7 @@ def _extract(name: str, data: bytes, *, want_images: bool, text_limit: int, text
                          "(attach them as videos), and none of the models hear audio")
     text = as_text(data)
     if text is None:
-        raise Unreadable(f"{name or 'this file'} is not a kind of file Maya reads ({'.' + ext if ext else 'binary'})"
+        raise Unreadable(f"{name or 'this file'} is not a kind of file Kestrel reads ({'.' + ext if ext else 'binary'})"
                          f" - attach {READS}{'' if text_only else ', or pictures'}")
     return _result(text, "text file", text_limit)
 
@@ -535,13 +535,13 @@ def _part_file(part: dict) -> tuple[str, bytes | None, str | None]:
             if isinstance(blocks, str):
                 return name, None, blocks
             return name, None, "\n".join(b.get("text", "") for b in blocks or [] if isinstance(b, dict))
-        raise ValueError(f"document.source.type {st!r}: Maya reads base64, text and content documents (not URLs "
+        raise ValueError(f"document.source.type {st!r}: Kestrel reads base64, text and content documents (not URLs "
                          "or file ids)")
     f = part.get("file") if kind == "file" and isinstance(part.get("file"), dict) else part   # OpenAI nests it
     name = f.get("filename") or "file"
     raw = f.get("file_data")
     if not raw:
-        raise ValueError(f"{kind}: Maya reads files sent inline as file_data (not file_id or file_url)")
+        raise ValueError(f"{kind}: Kestrel reads files sent inline as file_data (not file_id or file_url)")
     parsed = _data_url(raw)
     if parsed is None:
         try:

@@ -38,7 +38,7 @@ class RecordingEngine(MockEngine):
 class StampedLog(unittest.TestCase):
     """#783: a time before each of the server's own `[maya]` lines; the engine's lines and other text are untouched."""
 
-    def test_only_maya_lines_get_a_time(self):
+    def test_only_maya_lines_get_a_time_and_show_as_kestrel(self):
         import io
         import re
         from serve.server import StampedStdout
@@ -51,8 +51,8 @@ class StampedLog(unittest.TestCase):
         print("  [maya] indented is not stamped", file=out)
         lines = buf.getvalue().splitlines()
         stamp = r"\d\d:\d\d:\d\d "
-        self.assertRegex(lines[0], "^" + stamp + r"\[maya\] request 1 done$")
-        self.assertRegex(lines[1], "^" + stamp + r"\[maya\] in pieces - one line$")
+        self.assertRegex(lines[0], "^" + stamp + r"\[kestrel\] request 1 done$")
+        self.assertRegex(lines[1], "^" + stamp + r"\[kestrel\] in pieces - one line$")
         self.assertEqual(lines[2:], ["maya ds4 serve: request 926: prompt 100 tokens", "  [maya] indented is not stamped"])
         self.assertEqual(len(re.findall(stamp, buf.getvalue())), 2)
 

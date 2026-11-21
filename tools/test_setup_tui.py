@@ -478,7 +478,7 @@ class Screen(unittest.IsolatedAsyncioTestCase):
                                                *([keys] if keys else []))
                 self.assertEqual(end[0], want)
                 if want == "fail":
-                    self.assertEqual(end[1][0], "Maya stopped: its server ended with exit code 3")
+                    self.assertEqual(end[1][0], "Kestrel stopped: its server ended with exit code 3")
                     self.assertIn("boom", app.served)
                 else:
                     self.assertEqual(end[1], (Path("maya-test.json"), maya.UPDATE_EXIT))

@@ -378,7 +378,7 @@ RoundLog& round_log() {
         RoundLog x;
         if (const char* p = std::getenv("DS4_ROUND_LOG")) {
             x.f = std::fopen(p, "a");
-            if (x.f == nullptr) std::fprintf(stderr, "maya-ds4: DS4_ROUND_LOG=%s: cannot open it\n", p);
+            if (x.f == nullptr) std::fprintf(stderr, "kestrel-ds4: DS4_ROUND_LOG=%s: cannot open it\n", p);
             else std::fprintf(x.f, "# tag\tposition\tsource\tmade\tverified\tkept\tconfidences\n");
         }
         return x;
@@ -806,9 +806,9 @@ void start_watchdog(const strata::ds4::Model& m) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             if (!rule.stalled(g_busy.load(), g_beats.load(), now)) continue;
-            std::fprintf(stderr, "maya ds4 serve: where it stopped: %s\n", m.where().c_str());
+            std::fprintf(stderr, "kestrel ds4 serve: where it stopped: %s\n", m.where().c_str());
             // (the server reads the line with "issue #29" as the engine's own watchdog, not a lack of RAM)
-            std::fprintf(stderr, "maya ds4 serve: no progress for %d s during a request - stopping the engine so the "
+            std::fprintf(stderr, "kestrel ds4 serve: no progress for %d s during a request - stopping the engine so the "
                                  "server starts it again (issue #29, #539; MAYA_DS4_WATCHDOG_S)\n", limit);
             std::fflush(stderr);
             std::_Exit(3);   // (not abort(): a core dump of the pinned expert tiers takes minutes)
@@ -838,7 +838,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         std::printf("READY %lld stop\n", (long long) m.max_context());
     std::fflush(stdout);
     start_watchdog(m);
-    std::fprintf(stderr, "maya ds4 serve: GEN <max_new> [keys] <ids>; GENI <max_new> [keys] <pictures> <ids>; STOP, QUIT\n");
+    std::fprintf(stderr, "kestrel ds4 serve: GEN <max_new> [keys] <ids>; GENI <max_new> [keys] <pictures> <ids>; STOP, QUIT\n");
     Lines in;
     in.start();
     std::string line;
@@ -862,12 +862,12 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         if (m.pool_lost()) {   // (MAYA_MIXED_FRONT: its second engine is gone - the server goes on without it)
             std::printf("END the second GPU's engine (--mixed-gpus) is gone - this engine ends (exit 4); the next "
                         "request starts the model on one GPU\n");
-            std::fprintf(stderr, "maya ds4 serve: the second GPU's engine is gone - the engine ends (exit 4)\n");
+            std::fprintf(stderr, "kestrel ds4 serve: the second GPU's engine is gone - the engine ends (exit 4)\n");
             return;
         }
         std::printf("END a GPU's state is unknown after this request%s%s%s - the engine ends (exit 3); the next "
                     "request starts a fresh one\n", why.empty() ? "" : " (", why.c_str(), why.empty() ? "" : ")");
-        std::fprintf(stderr, "maya ds4 serve: a GPU's state is unknown after this request - the engine ends (exit 3) "
+        std::fprintf(stderr, "kestrel ds4 serve: a GPU's state is unknown after this request - the engine ends (exit 3) "
                              "so the server starts it again for the next request\n");
     };
     const auto end_if_broken = [&ending, &m] {   // (after it)
@@ -1681,7 +1681,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             }
             if (ok) {
                 m.set_images(std::move(imgs));
-                std::fprintf(stderr, "maya ds4 serve: %zu pictures, %d read (%.0f ms)\n", pics.size(), encoded,
+                std::fprintf(stderr, "kestrel ds4 serve: %zu pictures, %d read (%.0f ms)\n", pics.size(), encoded,
                              now_ms() - te);
             }
             for (Pic& q : pics) q.rgb = {};   // (only the start, hash and span stay)
@@ -1725,7 +1725,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             if (!tail_auto || tail_cost.keep()) asked.push_back(r.tail);
             static bool said_off = false;
             if (tail_auto && was && !said_off) {
-                std::fprintf(stderr, "maya ds4 serve: the tail restore point is left out on this PC: its read stop cost "
+                std::fprintf(stderr, "kestrel ds4 serve: the tail restore point is left out on this PC: its read stop cost "
                                      "%.1fx a long read's time a token (more than reading its tokens again: the last "
                                      "tail run %zu tokens in %.0f ms, the long read %.2f ms a token); one in 32 still "
                                      "keeps it, to measure again (MAYA_DS4_RESTORE_TAIL_AUTO=0 keeps it always)\n",
@@ -1742,7 +1742,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                 if (c.pos == (int64_t) r.tail && c.pos > (int64_t) from) P.tail_at = c.pos;   // (the plan kept it there)
             static bool said = false;
             if (!said)
-                std::fprintf(stderr, "maya ds4 serve: restore points a request asks for: up to %d a conversation, "
+                std::fprintf(stderr, "kestrel ds4 serve: restore points a request asks for: up to %d a conversation, "
                                      "%.1f MB of RAM each (MAYA_DS4_RESTORE_POINTS)\n",
                              m.marks_cap(), (double) m.check_bytes() / 1e6);
             said = true;
@@ -1835,7 +1835,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                     const bool was = tail_cost.costly(), known = tail_cost.measured();
                     if (tail_cost.add(P.ms_main, (size_t) P.tail_at - from, P.ms_tail, total - (size_t) P.tail_at) &&
                         ((was && !tail_cost.costly()) || (!known && tail_cost.measured() && !tail_cost.costly())))
-                        std::fprintf(stderr, "maya ds4 serve: the tail restore point is kept%s: its read stop costs %.1fx "
+                        std::fprintf(stderr, "kestrel ds4 serve: the tail restore point is kept%s: its read stop costs %.1fx "
                                              "a long read's time a token (2x or less: no more than reading its tokens "
                                              "again; the last tail run %zu tokens in %.0f ms, the long read %.2f ms a "
                                              "token)\n", was ? " again" : "", tail_cost.ratio, tail_cost.last_tail_tokens,
@@ -1872,7 +1872,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                 m.reset();
                 held.clear();
             }
-            std::fprintf(stderr, "maya ds4 serve: stopped while reading the prompt of %zu tokens, after %.0f ms%s\n",
+            std::fprintf(stderr, "kestrel ds4 serve: stopped while reading the prompt of %zu tokens, after %.0f ms%s\n",
                          total, now_ms() - t0, back ? "; the conversation before it is kept" : "");
             end_note();
             std::printf("DONE%s 0 %zu %.1f 0.0 cancel 0 0 %zu 0 0\n", tag.c_str(), total, now_ms() - t0, back ? from : (size_t) 0);
@@ -1896,7 +1896,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         {   // one line a prompt: the tokens read, the time, and the free VRAM before and after (issues #648, #438)
             const std::string vt = strata::core::vram_mark_text(P.v0, strata::core::vram_mark(g_vram_gpus));
             if (!vt.empty())
-                std::fprintf(stderr, "maya ds4 serve: prompt read: %zu tokens in %.1f s; %s\n",
+                std::fprintf(stderr, "kestrel ds4 serve: prompt read: %zu tokens in %.1f s; %s\n",
                              P.done > P.from ? P.done - P.from : (size_t) 0, (now_ms() - P.t0) / 1000.0, vt.c_str());
         }
         m.set_images({});
@@ -2065,7 +2065,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         stat_line();
         const double t2 = now_ms();
         if (turn_trace)
-            std::fprintf(stderr, "maya ds4 serve: trace got=%.1f parsed=%.1f read_start=%.1f read_end=%.1f first_t=%.1f end=%.1f\n",
+            std::fprintf(stderr, "kestrel ds4 serve: trace got=%.1f parsed=%.1f read_start=%.1f read_end=%.1f first_t=%.1f end=%.1f\n",
                          tr_got, tr_parsed, t0, t1, tr_first, t2);
         const strata::ds4::Stats& se = m.stats();   // (hits / lookups: the decode's routed experts in VRAM / all)
         end_note();
@@ -2075,36 +2075,36 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         std::fflush(stdout);
         const auto& s = m.stats();
         std::fprintf(stderr,
-                     "maya ds4 serve: prompt %zu tokens = %zu reused + %zu read in %.0f ms (%.1f tok/s), %lld generated "
+                     "kestrel ds4 serve: prompt %zu tokens = %zu reused + %zu read in %.0f ms (%.1f tok/s), %lld generated "
                      "in %.0f ms (%.2f tok/s); CPU lane %.1f%% of the experts\n",
                      r.ids.size(), from, r.ids.size() - from, t1 - t0,
                      t1 > t0 ? 1000.0 * (double) (r.ids.size() - from) / (t1 - t0) : 0.0, produced, t2 - t1,
                      t2 > t1 ? 1000.0 * (double) produced / (t2 - t1) : 0.0,
                      s.experts > s0.experts ? 100.0 * (double) (s.cpu_experts - s0.cpu_experts) / (double) (s.experts - s0.experts)
                                             : 0.0);
-        if (d_off > 0) std::fprintf(stderr, "maya ds4 serve: drafts %lld of %lld kept; %s\n", d_acc, d_off,
+        if (d_off > 0) std::fprintf(stderr, "kestrel ds4 serve: drafts %lld of %lld kept; %s\n", d_acc, d_off,
                                     per_position(s_dec, s).c_str());
-        if (!m.pool_line().empty()) std::fprintf(stderr, "maya ds4 serve: %s\n", m.pool_line().c_str());
+        if (!m.pool_line().empty()) std::fprintf(stderr, "kestrel ds4 serve: %s\n", m.pool_line().c_str());
         // (DS4_DRAFT_VRAM, read as MAYA_DS4_DRAFT_VRAM or DS4_DRAFT_VRAM: the cap's misses - this request's decode,
         //  the drafter's picks)
         if (std::getenv("MAYA_DS4_DRAFT_VRAM") != nullptr || std::getenv("DS4_DRAFT_VRAM") != nullptr)
-            std::fprintf(stderr, "maya ds4 serve: drafter experts: %lld picks, %lld of them on the CPU lane (this "
+            std::fprintf(stderr, "kestrel ds4 serve: drafter experts: %lld picks, %lld of them on the CPU lane (this "
                                  "request's decode; DS4_DRAFT_VRAM)\n",
                          (long long) (s.draft_experts - s_dec.draft_experts),
                          (long long) (s.draft_cpu - s_dec.draft_cpu));
         if (s.hr_maps + s.hr_fails + s.hr_abandoned + s.hr_hits > 0 ||
             std::getenv("MAYA_DS4_HELPER_RECENT") != nullptr || std::getenv("DS4_HELPER_RECENT") != nullptr)
-            std::fprintf(stderr, "maya ds4 serve: helper recent slots: %lld picks served, %lld mapped, %lld let go, "
+            std::fprintf(stderr, "kestrel ds4 serve: helper recent slots: %lld picks served, %lld mapped, %lld let go, "
                                  "%lld fills not done, %lld left unmapped (this request)\n",
                          (long long) (s.hr_hits - s_dec.hr_hits), (long long) (s.hr_maps - s_dec.hr_maps),
                          (long long) (s.hr_evicts - s_dec.hr_evicts), (long long) (s.hr_fails - s_dec.hr_fails),
                          (long long) (s.hr_abandoned - s_dec.hr_abandoned));
         if (lk && lk->windows > lk_w0)
-            std::fprintf(stderr, "maya ds4 serve: prompt lookup: %lld rounds (%lld without a draft), %lld of its %lld "
+            std::fprintf(stderr, "kestrel ds4 serve: prompt lookup: %lld rounds (%lld without a draft), %lld of its %lld "
                          "drafts kept (in the above)\n", lk->windows - lk_w0, lk->trusted - lk_t0,
                          lk->accepted - lk_a0, lk->offered - lk_o0);
         if (dc != nullptr && d_off > 0)
-            std::fprintf(stderr, "maya ds4 serve: draft cost (DS4_DRAFT_COST), ms a round by its rows: %s\n", dc->text().c_str());
+            std::fprintf(stderr, "kestrel ds4 serve: draft cost (DS4_DRAFT_COST), ms a round by its rows: %s\n", dc->text().c_str());
         prof_line(s_dec, s);   // DS4_PROF: this request's decode (the CLI's line, a request at a time)
         m.save_profile();
     }
@@ -2186,7 +2186,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         long long busy_n = 0, busy_io = -1;
         strata::ds4::Stats busy_s;
         std::string err;
-        std::fprintf(stderr, "maya ds4 serve: %d conversations at once (--parallel): GEN needs rid=<id>; STOP <rid>\n",
+        std::fprintf(stderr, "kestrel ds4 serve: %d conversations at once (--parallel): GEN needs rid=<id>; STOP <rid>\n",
                      nseq);
         const auto bind = [&](int s) {
             const int b = m.seq_bound();
@@ -2232,14 +2232,14 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                         (long long) (se.experts - a.sd.experts));
             std::fflush(stdout);
             std::fprintf(stderr,
-                         "maya ds4 serve: request %lld: prompt %zu tokens = %zu reused + %zu read in %.0f ms (%.1f tok/s), "
+                         "kestrel ds4 serve: request %lld: prompt %zu tokens = %zu reused + %zu read in %.0f ms (%.1f tok/s), "
                          "%lld generated in %.0f ms (%.2f tok/s, %zu conversations running; drafts %lld of %lld kept)\n",
                          a.r.rid, a.r.ids.size(), a.P.from, a.r.ids.size() - a.P.from, a.t1 - a.P.t0,
                          a.t1 > a.P.t0 ? 1000.0 * (double) (a.r.ids.size() - a.P.from) / (a.t1 - a.P.t0) : 0.0,
                          a.produced, t2 - a.t1, t2 > a.t1 ? 1000.0 * (double) a.produced / (t2 - a.t1) : 0.0, acts.size(),
                          a.d_acc, a.d_off);
             if (dc != nullptr && a.d_off > 0)
-                std::fprintf(stderr, "maya ds4 serve: draft cost (DS4_DRAFT_COST), ms a round by its rows: %s\n",
+                std::fprintf(stderr, "kestrel ds4 serve: draft cost (DS4_DRAFT_COST), ms a round by its rows: %s\n",
                              dc->text().c_str());
             release(a);
         };
@@ -2823,7 +2823,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
 int profile_run(strata::ds4::Model& m, const std::string& path, const std::string& out) {
     std::ifstream in(path);
     if (!in) {
-        std::fprintf(stderr, "maya-ds4: --profile-run: cannot open %s\n", path.c_str());
+        std::fprintf(stderr, "kestrel-ds4: --profile-run: cannot open %s\n", path.c_str());
         return 1;
     }
     std::string line, err;
@@ -2841,7 +2841,7 @@ int profile_run(strata::ds4::Model& m, const std::string& path, const std::strin
         for (size_t done = 0; done < seq.size();) {
             const size_t k = std::min<size_t>((size_t) m.feed_unit(), seq.size() - done);
             if (!m.feed(seq.data() + done, (int) k, done + k == seq.size() ? 1 : 0, err)) {
-                std::fprintf(stderr, "maya-ds4: --profile-run, line %lld: %s\n", lines + 1, err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: --profile-run, line %lld: %s\n", lines + 1, err.c_str());
                 m.save_profile();
                 return 1;
             }
@@ -2885,12 +2885,12 @@ bool feed_prompt(strata::ds4::Model& m, const std::vector<int>& ids, bool mark, 
 // a line a round
 int spec_eval(strata::ds4::Model& m, const std::string& path, int n, float temp, unsigned long long seed) {
     if (m.draft_block() <= 0) {
-        std::fprintf(stderr, "maya-ds4: --spec-eval needs the DSpark drafter (a pack with it, --dspark on)\n");
+        std::fprintf(stderr, "kestrel-ds4: --spec-eval needs the DSpark drafter (a pack with it, --dspark on)\n");
         return 2;
     }
     std::ifstream in(path);
     if (!in) {
-        std::fprintf(stderr, "maya-ds4: --spec-eval: cannot open %s\n", path.c_str());
+        std::fprintf(stderr, "kestrel-ds4: --spec-eval: cannot open %s\n", path.c_str());
         return 1;
     }
     RoundLog& rl = round_log();
@@ -2912,7 +2912,7 @@ int spec_eval(strata::ds4::Model& m, const std::string& path, int n, float temp,
         }
         rl.tag = "p" + std::to_string(++prompts);
         if (!feed_prompt(m, ids, false, err)) {
-            std::fprintf(stderr, "maya-ds4: --spec-eval, prompt %lld: %s\n", prompts, err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: --spec-eval, prompt %lld: %s\n", prompts, err.c_str());
             return 1;
         }
         unsigned long long counter = 0;
@@ -2925,7 +2925,7 @@ int spec_eval(strata::ds4::Model& m, const std::string& path, int n, float temp,
             int off = 0, acc = 0;
             if (!round(m, tok, (int) (n - produced), true, 0.0f, temp, 1.0f, top_k, 0.0f, seed, counter, got, off, acc,
                        err, 0.0f, nullptr)) {
-                std::fprintf(stderr, "maya-ds4: --spec-eval, prompt %lld: %s\n", prompts, err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: --spec-eval, prompt %lld: %s\n", prompts, err.c_str());
                 return 1;
             }
             ++rounds;
@@ -3049,17 +3049,17 @@ Chi two_sample(const std::vector<int>& a, const std::vector<int>& b) {
 // test then sees little
 int sampler_test(strata::ds4::Model& m, const std::vector<int>& ids, int n, unsigned long long seed) {
     if (m.draft_block() <= 0) {
-        std::fprintf(stderr, "maya-ds4: --sampler-test needs the DSpark drafter (a pack with it, --dspark on)\n");
+        std::fprintf(stderr, "kestrel-ds4: --sampler-test needs the DSpark drafter (a pack with it, --dspark on)\n");
         return 2;
     }
     if (ids.size() < 2 || n < 50) {
-        std::fprintf(stderr, "maya-ds4: --sampler-test N (50 or more) needs --ids of two tokens or more\n");
+        std::fprintf(stderr, "kestrel-ds4: --sampler-test N (50 or more) needs --ids of two tokens or more\n");
         return 2;
     }
     std::string err;
     const int64_t P = (int64_t) ids.size();
     if (!feed_prompt(m, ids, true, err)) {
-        std::fprintf(stderr, "maya-ds4: --sampler-test: %s\n", err.c_str());
+        std::fprintf(stderr, "kestrel-ds4: --sampler-test: %s\n", err.c_str());
         return 1;
     }
     const int y = m.sample(0.0f, 1.0f, 1, 0.0f, 0, 0);
@@ -3086,7 +3086,7 @@ int sampler_test(strata::ds4::Model& m, const std::vector<int>& ids, int n, unsi
     for (const Chain& c : chains) {
         m.set_penalties(c.pen_n, c.rep, c.freq, c.pres);
         if (!back() || !m.step(y, true, err)) {
-            std::fprintf(stderr, "maya-ds4: --sampler-test: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: --sampler-test: %s\n", err.c_str());
             return 1;
         }
         std::vector<int> plain((size_t) 20 * n), spec;
@@ -3105,7 +3105,7 @@ int sampler_test(strata::ds4::Model& m, const std::vector<int>& ids, int n, unsi
             std::vector<float> conf;
             int acc = 0, next = -1;
             if (!back() || !m.draft(y, drafts, conf, err, c.t, c.top_p, c.top_k, c.min_p, seed, ctr)) {
-                std::fprintf(stderr, "maya-ds4: --sampler-test: %s\n", err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: --sampler-test: %s\n", err.c_str());
                 return 1;
             }
             drawn = drawn || m.drafts_sampled();
@@ -3115,7 +3115,7 @@ int sampler_test(strata::ds4::Model& m, const std::vector<int>& ids, int n, unsi
             }
             if ((int) drafts.size() > m.verify_max() - 1) drafts.resize((size_t) (m.verify_max() - 1));
             if (!m.verify(y, drafts, c.t, c.top_p, c.top_k, c.min_p, seed, ctr, acc, next, err)) {
-                std::fprintf(stderr, "maya-ds4: --sampler-test: %s\n", err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: --sampler-test: %s\n", err.c_str());
                 return 1;
             }
             spec.push_back(acc > 0 ? drafts[0] : next);
@@ -3862,14 +3862,14 @@ int main(int argc, char** argv) {
         const int k = strata::ds4::Model::mixed_plan(o.pack, (int) o.reserve_mib, mg != nullptr ? std::atof(mg) : 1.0,
                                                      msg, err);
         if (k < 0) {
-            std::fprintf(stderr, "maya-ds4: --mixed-plan: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: --mixed-plan: %s\n", err.c_str());
             return 1;
         }
         std::printf("MIXED_PLAN %d %s\n", k, msg.c_str());
         return 0;
     }
     if (!o.remote_part.empty() && o.seqs > 1) {
-        std::fprintf(stderr, "maya-ds4: --remote-part runs one conversation: --parallel %d is not covered\n", o.seqs);
+        std::fprintf(stderr, "kestrel-ds4: --remote-part runs one conversation: --parallel %d is not covered\n", o.seqs);
         return 2;
     }
     if (o.pack.empty() || (!serve_mode && part_port == 0 && ids_s.empty() && enc_rgb.empty() && ppl.empty() && prof_run.empty() &&
@@ -3912,19 +3912,19 @@ int main(int argc, char** argv) {
     }
     o.vision_only = !enc_rgb.empty();
     if (part_port > 0 && o.part_from <= 0) {
-        std::fprintf(stderr, "maya-ds4: --part-serve needs --part-from <the first layer it runs>\n");
+        std::fprintf(stderr, "kestrel-ds4: --part-serve needs --part-from <the first layer it runs>\n");
         return 2;
     }
     strata::ds4::Model m;
     std::string err;
     o.lookup = suffix_draft > 0;   // (its verify windows' buffers, with no drafter too)
     if (!m.load(o, err)) {
-        std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+        std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
         return 1;
     }
     if (!o.vision_only) std::fprintf(stderr, "%s", m.describe().c_str());
     if (dspark_on_asked && !o.vision_only && !m.has_drafter())
-        std::fprintf(stderr, "maya-ds4: warning: --dspark on, but this pack has no DSpark drafter blocks (mtp.* tensors): "
+        std::fprintf(stderr, "kestrel-ds4: warning: --dspark on, but this pack has no DSpark drafter blocks (mtp.* tensors): "
                              "decoding with prompt lookup only (no drafter)\n");
     std::unique_ptr<Lookup> lk;   // (prompt lookup beside DSpark, or alone: one policy over every request of this run)
     if (suffix_draft > 0)
@@ -3932,20 +3932,20 @@ int main(int argc, char** argv) {
     std::unique_ptr<DraftCost> dc;   // (DS4_DRAFT_COST: DSpark's window by this PC's measured cost, over the run)
     if (const char* v = ds4_env("DS4_DRAFT_COST"); v != nullptr && std::atoi(v) != 0 && m.draft_block() > 0) {
         dc = std::make_unique<DraftCost>(m.verify_max());
-        std::fprintf(stderr, "maya-ds4: DS4_DRAFT_COST: DSpark's window by the measured cost of its rows (opt-in; the "
+        std::fprintf(stderr, "kestrel-ds4: DS4_DRAFT_COST: DSpark's window by the measured cost of its rows (opt-in; the "
                              "same tokens)\n");
     } else if (ds4_env("DS4_DRAFT_COST") != nullptr && std::atoi(ds4_env("DS4_DRAFT_COST")) != 0)
-        std::fprintf(stderr, "maya-ds4: DS4_DRAFT_COST: no DSpark drafter loaded, nothing to size\n");
+        std::fprintf(stderr, "kestrel-ds4: DS4_DRAFT_COST: no DSpark drafter loaded, nothing to size\n");
     if (ds4_env("DS4_RHELPER_SERVE") != nullptr) {   // MAYA_MIXED_HELPER: a lead engine's experts, then the end
         if (!m.rhelper_serve(err)) {
-            std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
             return 1;
         }
         return 0;
     }
     if (part_port > 0) {   // the pool's part server: the front's layers come over the link
         if (!m.part_serve(part_port, err)) {
-            std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
             return 1;
         }
         return 0;
@@ -3994,7 +3994,7 @@ int main(int argc, char** argv) {
             } else
                 fed = m.feed(seq.data(), (int) seq.size(), (int) seq.size(), err) && m.logits(lg);
             if (!fed || lg.size() < (seq.size() - 1) * (size_t) V) {
-                std::fprintf(stderr, "maya-ds4: sequence %d: %s\n", k, err.empty() ? "no logits" : err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: sequence %d: %s\n", k, err.empty() ? "no logits" : err.c_str());
                 return 1;
             }
             double s_nll = 0.0;
@@ -4021,14 +4021,14 @@ int main(int argc, char** argv) {
         const bool got = f != nullptr && !px.empty() && std::fread(px.data(), 1, px.size(), f) == px.size();
         if (f != nullptr) std::fclose(f);
         if (!got) {
-            std::fprintf(stderr, "maya-ds4: %s: expected %d x %d RGB bytes (--size WxH)\n", enc_rgb.c_str(), enc_w, enc_h);
+            std::fprintf(stderr, "kestrel-ds4: %s: expected %d x %d RGB bytes (--size WxH)\n", enc_rgb.c_str(), enc_w, enc_h);
             return 1;
         }
         std::vector<uint16_t> span;
         for (int k = 0; k < 2; ++k) {   // (the second: warm)
             const double te = now_ms();
             if (!m.encode_image(px.data(), enc_w, enc_h, span, err)) {
-                std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
                 return 1;
             }
             std::fprintf(stderr, "vision: %d x %d pixels -> a span of %zu rows in %.0f ms\n", enc_w, enc_h,
@@ -4044,7 +4044,7 @@ int main(int argc, char** argv) {
     if (!ids_s.empty() && ids_s[0] == '@') {   // --ids @FILE: the ids from a file (a long prompt passes no argv limit)
         std::FILE* f = std::fopen(ids_s.c_str() + 1, "rb");
         if (f == nullptr) {
-            std::fprintf(stderr, "maya-ds4: cannot open %s\n", ids_s.c_str() + 1);
+            std::fprintf(stderr, "kestrel-ds4: cannot open %s\n", ids_s.c_str() + 1);
             return 1;
         }
         std::string all;
@@ -4057,7 +4057,7 @@ int main(int argc, char** argv) {
     if (!images.empty()) {   // --images: a GENI file's pictures, for the prompt's spans
         std::vector<Pic> pics;
         if (!read_pics(images, pics, err)) {
-            std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
             return 1;
         }
         std::vector<strata::ds4::Image> imgs;
@@ -4065,7 +4065,7 @@ int main(int argc, char** argv) {
             auto rows = std::make_shared<std::vector<uint16_t>>();
             const double te = now_ms();
             if (!m.encode_image(q.rgb.data(), q.width, q.height, *rows, err)) {
-                std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+                std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
                 return 1;
             }
             std::fprintf(stderr, "picture at %lld: %d x %d pixels, %zu tokens, %.0f ms\n", (long long) q.start, q.width,
@@ -4096,7 +4096,7 @@ int main(int argc, char** argv) {
         const int T = (int) std::min<size_t>((size_t) window, ids.size() - a);
         const bool last = a + (size_t) T == ids.size();
         if (!m.feed(ids.data() + a, T, df != nullptr ? T : (last ? 1 : 0), err)) {
-            std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+            std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
             return 1;
         }
         if (df != nullptr && m.logits(lg)) std::fwrite(lg.data(), 4, lg.size(), df);
@@ -4138,7 +4138,7 @@ int main(int argc, char** argv) {
                         lk_t0 = lk ? lk->trusted : 0;
         for (;;) {
             if (tok < 0) {   // (a sample's CUDA error, printed by the sampler)
-                std::fprintf(stderr, "maya-ds4: the sample failed\n");
+                std::fprintf(stderr, "kestrel-ds4: the sample failed\n");
                 return 1;
             }
             out.push_back(tok);
@@ -4151,7 +4151,7 @@ int main(int argc, char** argv) {
                 const bool try_spec = spec && !cool;
                 if (!round(m, tok, n - (int) out.size(), try_spec, o.dspark_conf, temp, 1.0f, temp > 0 ? 64 : 1, 0.0f,
                            cli_seed, counter, got, off, acc, err, -1.0f, lk.get(), dc.get())) {
-                    std::fprintf(stderr, "maya-ds4: %s\n", err.c_str());
+                    std::fprintf(stderr, "kestrel-ds4: %s\n", err.c_str());
                     return 1;
                 }
                 d_off += off;

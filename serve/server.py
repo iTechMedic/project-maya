@@ -2071,10 +2071,10 @@ class Vision:
         import shutil
         if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
             raise ValueError("videos need ffmpeg and ffprobe on this PC (Linux: sudo apt install ffmpeg; Windows: winget "
-                             "install Gyan.FFmpeg; macOS: brew install ffmpeg), then restart Maya")
+                             "install Gyan.FFmpeg; macOS: brew install ffmpeg), then restart Kestrel")
         data = self.load(source)
         if self.video_container(data) is None:
-            raise ValueError("this video's format is not one Maya reads: send MP4, MOV, WebM, MKV or AVI")
+            raise ValueError("this video's format is not one Kestrel reads: send MP4, MOV, WebM, MKV or AVI")
         key = hashlib.sha256(data).hexdigest()[:32]
         with self.lock:
             if key in self.cache:
@@ -2087,7 +2087,7 @@ class Vision:
             if seconds is not None and seconds * self.VIDEO_FPS > limit:
                 vid.unlink(missing_ok=True)
                 raise ValueError(f"the video is {seconds:.0f} s long: {seconds * self.VIDEO_FPS:.0f} frames at "
-                                 f"{self.VIDEO_FPS:g} a second, more than the {limit} Maya reads (MAYA_VIDEO_MAX_FRAMES "
+                                 f"{self.VIDEO_FPS:g} a second, more than the {limit} Kestrel reads (MAYA_VIDEO_MAX_FRAMES "
                                  f"sets it; every frame takes an image's share of the context)")
             if self.proc is None:
                 self._start()
@@ -2694,7 +2694,7 @@ class Service:
         check_request_sampling(req)
         bias = logit_bias_of(req.get("logit_bias"), len(getattr(self.tok, "tokens", None) or ()) or None)
         if bias and (getattr(self.engine, "info", None) or {}).get("logit_bias") != 1:
-            raise ValueError("logit_bias: this engine does not apply token biases - update Maya (./maya.sh --setup)")
+            raise ValueError("logit_bias: this engine does not apply token biases - update Kestrel (./kestrel.sh --setup)")
         # ablate (Maya's refusal ablation, the same name on every API): true / false; true needs an engine that loaded a
         # direction (INFO ablate=1) - else the answer would come back unchanged, which a client could not tell
         ablate = req.get("ablate")
@@ -2716,7 +2716,7 @@ class Service:
             if limit <= 0:
                 raise ValueError("ignore_eos: needs max_tokens (the answer would run until the context is full)")
             if (getattr(self.engine, "info", None) or {}).get("logit_bias") != 1:
-                raise ValueError("ignore_eos: this engine does not apply token biases - update Maya (./maya.sh --setup)")
+                raise ValueError("ignore_eos: this engine does not apply token biases - update Kestrel (./kestrel.sh --setup)")
             bias = {**bias, **{t: -100.0 for t in sorted(self.stop_ids | self.eos_ids)}}
         if "logit_bias" in req or ignore:
             req["logit_bias"] = bias
@@ -2728,7 +2728,7 @@ class Service:
         top = (getattr(self.engine, "info", None) or {}).get("logprobs")
         if n is not None and not (isinstance(top, int) and top >= n):
             raise ValueError("logprobs: this model's engine does not report token log-probabilities (the DeepSeek "
-                             "engine does - update Maya (./maya.sh --setup) if it is that one)")
+                             "engine does - update Kestrel (./kestrel.sh --setup) if it is that one)")
 
     def render_ids(self, messages, tools, kwargs, suffix="") -> list[int]:
         """The template rendered for `messages` and `tools` (+ `suffix`, text the server appends to the prompt) and
@@ -3118,11 +3118,11 @@ class Service:
         if not 1024 <= n <= 65535:
             raise ValueError("the port must be a number from 1024 to 65535")
         if n == port:
-            raise ValueError(f"Maya listens on {n} already")
+            raise ValueError(f"Kestrel listens on {n} already")
         if not self.config_path:
             raise ValueError("this server runs without a config, so a port cannot be saved: start it with --port")
         if getattr(self, "port_restart", None):
-            raise ValueError("Maya is already moving to another port")
+            raise ValueError("Kestrel is already moving to another port")
         import socket
         try:
             with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -3134,7 +3134,7 @@ class Service:
         if restarts:
             self.port_restart = n
             threading.Thread(target=self._restart_on_port, args=(n,), daemon=True).start()
-        print(f"[maya] the port {n} is saved" + (": Maya starts again on it" if restarts else
+        print(f"[maya] the port {n} is saved" + (": Kestrel starts again on it" if restarts else
               " - it applies from the next start"), flush=True)
         return {"port": n, "restarts": restarts}
 
@@ -3197,9 +3197,9 @@ class Service:
 
     def _restart_busy(self):
         if getattr(self, "model_restart", None) or getattr(self, "port_restart", None):
-            raise ValueError("Maya is already starting again")
+            raise ValueError("Kestrel is already starting again")
         if self.reloading() or self.updater.busy():
-            raise ValueError("Maya is reloading or updating; try again when it is done")
+            raise ValueError("Kestrel is reloading or updating; try again when it is done")
 
     def model_settings(self, name, settings, dry_run: bool = False) -> dict:
         """The engine settings of the config `name` (the Models page): checked, and unless dry_run saved into it.  The
@@ -3208,7 +3208,7 @@ class Service:
         p = self._model_path(name)
         cfg = models.read(p)
         if not cfg:
-            raise ValueError(f"{p.name}: not a config Maya can read")
+            raise ValueError(f"{p.name}: not a config Kestrel can read")
         new = models.apply(cfg, settings)                 # (a ValueError: what is wrong, nothing saved)
         if dry_run:
             return {"command": models.command(new), "settings": models.shown_settings(new)}
@@ -3223,7 +3223,7 @@ class Service:
         restarts = bool(running and out["changed"] and os.environ.get("MAYA_RESTART_ON_UPDATE"))
         if restarts:
             self._restart_into(p, "settings")
-        print(f"[maya] {p.name}: engine settings saved" + (": Maya starts again with them" if restarts else
+        print(f"[maya] {p.name}: engine settings saved" + (": Kestrel starts again with them" if restarts else
               " - they apply from its next start" if out["changed"] else " (nothing changed)"), flush=True)
         return {**out, "running": running, "restarts": restarts}
 
@@ -3252,7 +3252,7 @@ class Service:
         restarts = bool(out["changed"] and os.environ.get("MAYA_RESTART_ON_UPDATE"))
         if restarts:
             self._restart_into(p, "settings")
-        print(f"[maya] Turbo {'on' if on else 'off'}: {p.name}" + (": Maya starts again" if restarts else
+        print(f"[maya] Turbo {'on' if on else 'off'}: {p.name}" + (": Kestrel starts again" if restarts else
               " - the engine settings apply from its next start" if out["changed"] else " (the engine needs no restart)"),
               flush=True)
         return {**self.turbo_info(), "restarting_now": restarts, "changed": out["changed"]}
@@ -3275,7 +3275,7 @@ class Service:
         restarts = bool(os.environ.get("MAYA_RESTART_ON_UPDATE"))
         if restarts:
             self._restart_into(p, "switch")
-        print(f"[maya] {p.name} is the model to start" + (": Maya starts again with it" if restarts else
+        print(f"[maya] {p.name} is the model to start" + (": Kestrel starts again with it" if restarts else
               " next (a start without --config picks it)"), flush=True)
         return {"to": p.name, "model": cfg.get("model_name") or "", "restarts": restarts}
 
@@ -3287,7 +3287,7 @@ class Service:
         p = self._model_path(name)
         running = self._is_running(p)
         if getattr(self, "model_restart", None):
-            raise ValueError("Maya is starting again; try again when it is done")
+            raise ValueError("Kestrel is starting again; try again when it is done")
         if dry_run:
             return {"file": p.name, "running": running, **models.delete_plan(self.models_root(), p)}
         if files and self.pull_slot().busy():            # (the download may be writing into the same folder)
@@ -3301,9 +3301,9 @@ class Service:
 
     def _delete_running(self, p: Path, files: bool, then) -> dict:
         if not then:
-            raise ValueError(f"{p.name} is the model running now: pick the model Maya switches to first")
+            raise ValueError(f"{p.name} is the model running now: pick the model Kestrel switches to first")
         if not os.environ.get("MAYA_RESTART_ON_UPDATE"):
-            raise ValueError("this server was not started by maya.sh or START-MAYA.bat, so it cannot switch to another "
+            raise ValueError("this server was not started by kestrel.sh or START-KESTREL.bat, so it cannot switch to another "
                              f"model by itself: start another model, then delete {p.name}")
         if files:                                        # (checked now: the next server only reports)
             plan = models.delete_plan(self.models_root(), p)
@@ -5434,7 +5434,7 @@ JOB_KEEP_N = 32      # and at most this many finished ones (the oldest go first;
 
 JOBS_DIR: Path | None = None   # the answers' files (answers/ beside the config); None: in RAM only
 JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,80}")
-RESTARTED = "Maya restarted before this answer ended; this is what it had written."
+RESTARTED = "Kestrel restarted before this answer ended; this is what it had written."
 
 
 def job_file(jid: str):
@@ -5953,15 +5953,15 @@ def make_handler(svc: Service):
                 return False
             if not getattr(svc, "model_restart", None):
                 if not os.environ.get("MAYA_RESTART_ON_UPDATE"):
-                    self._json(409, {"error": f"{p.name} is installed, but this server was not started by maya.sh or "
-                                              "START-MAYA.bat, so it cannot switch models itself: start it with that model"})
+                    self._json(409, {"error": f"{p.name} is installed, but this server was not started by kestrel.sh or "
+                                              "START-KESTREL.bat, so it cannot switch models itself: start it with that model"})
                     return False
                 try:
                     svc.switch_model(p.name)
                 except ValueError as e:
                     self._json(409, {"error": str(e)})
                     return False
-            body = json.dumps({"error": f"loading model {model_api.public_name(p)}: Maya starts again with it (a big model "
+            body = json.dumps({"error": f"loading model {model_api.public_name(p)}: Kestrel starts again with it (a big model "
                                         "takes minutes); retry this request, GET /api/ps shows when it is loaded",
                                "loading": model_api.public_name(p) + ":latest"}).encode()
             self.send_response(503)
@@ -6658,7 +6658,7 @@ def make_handler(svc: Service):
                 return False
             origin = self.headers.get("Origin")
             if origin and origin.split("://", 1)[-1] != self.headers.get("Host", ""):
-                self._json(403, {"error": {"message": f"{what} only from Maya's own page"}})
+                self._json(403, {"error": {"message": f"{what} only from Kestrel's own page"}})
                 return False
             return True
 
@@ -6771,7 +6771,7 @@ def make_handler(svc: Service):
                 return
             origin = self.headers.get("Origin")
             if origin and origin.split("://", 1)[-1] != self.headers.get("Host", ""):
-                self._json(403, {"error": {"message": "files are read only for Maya's own page"}})
+                self._json(403, {"error": {"message": "files are read only for Kestrel's own page"}})
                 return
             if len(raw) > attach.MAX_BYTES:
                 self._json(413, {"error": {"message": f"the file is over the {attach.MAX_BYTES >> 20} MB a chat "
@@ -7405,8 +7405,9 @@ class ServerLogTee:
 
 
 class StampedStdout:
-    """stdout with a local `HH:MM:SS ` before each of this server's own lines (`[maya] ...`, #783); the engine's lines and
-    any other text pass through as they are.  A line is stamped when it starts, whatever pieces print() writes it in."""
+    """stdout with a local `HH:MM:SS ` before each of this server's own lines (`[maya] ...`, #783), shown as Kestrel's
+    (`[kestrel] ...`: the code keeps upstream's prefix, so its merges stay plain); the engine's lines and any other text
+    pass through as they are.  A line is stamped when it starts, whatever pieces print() writes it in."""
 
     def __init__(self, stream):
         self.stream, self.at_start, self.lock = stream, True, threading.Lock()
@@ -7417,6 +7418,7 @@ class StampedStdout:
             for seg in text.splitlines(keepends=True):
                 if self.at_start and seg.startswith("[maya]"):
                     out.append(time.strftime("%H:%M:%S "))
+                    seg = "[kestrel]" + seg[len("[maya]"):]
                 out.append(seg)
                 self.at_start = seg.endswith(chr(10)) or seg.endswith(chr(13))
             if out:
@@ -7497,7 +7499,7 @@ def main() -> int:
     try:                                                # before the minutes of loading: is the port free?
         Server((a.host, a.port), BaseHTTPRequestHandler).server_close()
     except OSError:
-        ap.error(f"port {a.port} is already in use - is Maya (or another server) already running? "
+        ap.error(f"port {a.port} is already in use - is Kestrel (or another server) already running? "
                  f"Close it, or start this one with a different --port")
     if cfg.get("tokenizer"):
         a.tokenizer = cfg["tokenizer"]
@@ -7750,7 +7752,7 @@ def main() -> int:
                   "to the config (clients send it as their API key; the web page asks for it)", flush=True)
         if os.name == "nt":
             print("       nothing arrives? Windows Firewall blocks it until allowed: accept its prompt for Python, or run "
-                  "in an admin PowerShell:\n         New-NetFirewallRule -DisplayName \"Maya " + str(a.port) + "\" "
+                  "in an admin PowerShell:\n         New-NetFirewallRule -DisplayName \"Kestrel " + str(a.port) + "\" "
                   "-Direction Inbound -Protocol TCP -LocalPort " + str(a.port) + " -Action Allow -Profile Private\n"
                   "       (and set this network to Private in Windows' network settings)", flush=True)
     if a.open:
