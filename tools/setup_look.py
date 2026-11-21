@@ -20,12 +20,35 @@ STEP_LINE = re.compile(r"=== Step (\d+): (.*) ===$")   # (Bridge.step's line)
 # Kestrel's Dusk (serve/web/kestrel.css, dark); EDGE: the outer boxes, a step brighter than its card lines.  Every
 # colour that carries text reads at 4.5:1 or better on BG (FAINT too: the key hints), and each element is one colour
 # (no gradients: a terminal without 24-bit colour rounds a gradient into bands)
-BG, SURFACE3, LINE, EDGE = "#081322", "#23395a", "#203553", "#2b4366"
-INK, INK_SOFT, MUTED, FAINT = "#eaf0f8", "#c3cedd", "#8fa0b8", "#7d8ea8"
-ACCENT, ACCENT2, ACCENT_TEXT, INFO_TEXT = "#ff8a3d", "#5ea8ff", "#ffb27a", "#9cc8ff"
-OK, OK_TEXT, WARN, DANGER, TINT = "#4ade80", "#86efac", "#fbbf24", "#fb7185", "#2b2426"   # TINT: --st-accent-tint
+
+
+def truecolor() -> bool:
+    """Whether this terminal gets 24-bit colour, as Rich - and so Textual - decides it (COLORTERM=truecolor or 24bit,
+    Windows' console): then Dusk as it is.  Else (TERM=xterm-256color alone, as over ssh) Rich rounds each colour to
+    the nearest of the 256, and Dusk's navy became black with teal lines: the screen then takes colours that ARE
+    among the 256 (below), navy kept navy."""
+    try:
+        from rich.console import Console
+        return Console(force_terminal=True).color_system in ("truecolor", "windows")
+    except Exception:                                   # noqa: BLE001 - no Rich: nothing to draw anyway
+        return True
+
+
+TRUECOLOR = truecolor()
+if TRUECOLOR:
+    BG, SURFACE3, LINE, EDGE = "#081322", "#23395a", "#203553", "#2b4366"
+    INK, INK_SOFT, MUTED, FAINT = "#eaf0f8", "#c3cedd", "#8fa0b8", "#7d8ea8"
+    ACCENT, ACCENT2, ACCENT_TEXT, INFO_TEXT = "#ff8a3d", "#5ea8ff", "#ffb27a", "#9cc8ff"
+    OK, OK_TEXT, WARN, DANGER, TINT = "#4ade80", "#86efac", "#fbbf24", "#fb7185", "#2b2426"   # TINT: --st-accent-tint
+    SURFACE, PANEL = "#12243d", "#1a2f4d"
+else:                                                   # (xterm's 256: 17 navy, 18, 60 slate, 67 steel blue, 208 orange)
+    BG, SURFACE3, LINE, EDGE = "#00005f", "#5f5f87", "#5f5f87", "#5f87af"
+    INK, INK_SOFT, MUTED, FAINT = "#eeeeee", "#d0d0d0", "#afafd7", "#8787af"
+    ACCENT, ACCENT2, ACCENT_TEXT, INFO_TEXT = "#ff8700", "#5fafff", "#ffaf5f", "#87d7ff"
+    OK, OK_TEXT, WARN, DANGER, TINT = "#5fd787", "#87ffaf", "#ffd75f", "#ff5f87", "#000087"
+    SURFACE, PANEL = "#00005f", "#000087"
 THEME = Theme(name="kestrel", primary=ACCENT, secondary=ACCENT2, accent=ACCENT, foreground=INK, background=BG,
-              surface="#12243d", panel="#1a2f4d", success=OK, warning=WARN, error=DANGER, dark=True)
+              surface=SURFACE, panel=PANEL, success=OK, warning=WARN, error=DANGER, dark=True)
 # "maya." in font8x8 (public domain: the IBM PC BIOS font), 2 x 2 of its pixels to a character cell, as binsider's
 FONT = {"m": (0x00, 0x00, 0x33, 0x7F, 0x7F, 0x6B, 0x63, 0x00), "a": (0x00, 0x00, 0x1E, 0x30, 0x3E, 0x33, 0x6E, 0x00),
         "y": (0x00, 0x00, 0x33, 0x33, 0x33, 0x3E, 0x30, 0x1F), ".": (0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x00)}

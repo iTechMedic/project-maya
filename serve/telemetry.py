@@ -642,6 +642,15 @@ def amd_device_dir(index, sysfs=None):
     when there is no such card (or no amdgpu).  HIP orders the cards as the KFD topology lists its GPU nodes (the
     CPU nodes skipped) - the same order setup's amd_gpus() and HIP_VISIBLE_DEVICES use - and KFD links each node to
     its render node by drm_render_minor, which is the bridge between the two numberings."""
+    node = amd_node(index, sysfs)
+    if not node or not node.get("drm_render_minor"):
+        return None
+    dev = os.path.join(sysfs or SYSFS, "class", "drm", "renderD" + node["drm_render_minor"].strip(), "device")
+    return dev if os.path.isdir(dev) else None
+
+
+def amd_node(index, sysfs=None):
+    """The KFD topology properties of the AMD GPU that HIP numbers `index` (amd_device_dir), or None."""
     base = os.path.join(sysfs or SYSFS, "class", "kfd", "kfd", "topology", "nodes")
     try:
         nodes = sorted((n for n in os.listdir(base) if n.isdigit()), key=int)
@@ -657,10 +666,71 @@ def amd_device_dir(index, sysfs=None):
             gpus.append(props)
         except (OSError, ValueError):
             continue
-    if not 0 <= index < len(gpus) or not gpus[index].get("drm_render_minor"):
-        return None
-    dev = os.path.join(sysfs or SYSFS, "class", "drm", "renderD" + gpus[index]["drm_render_minor"].strip(), "device")
-    return dev if os.path.isdir(dev) else None
+    return gpus[index] if 0 <= index < len(gpus) else None
+
+
+# An AMD card's name where its driver has no product_name file (as for an R9700 and a Radeon 8060S on Linux 6.x):
+# ROCm's rocminfo, which names every GPU agent ("Marketing Name") with its PCI location ("BDFID": bus << 8 |
+# device << 3 | function, KFD's location_id) - matched by that location, never by position, so any order of the
+# cards reads right - else the PCI ID list's name for the card's device id.
+ROCMINFO_PATHS = ("/opt/rocm/bin/rocminfo", "/usr/bin/rocminfo")
+PCI_IDS = ("/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids", "/usr/share/pci.ids")
+_ROCMINFO = None                   # {location_id: marketing name}, read once a process
+
+
+def rocminfo_names(text=None) -> dict:
+    """{PCI location (KFD's location_id): marketing name} of rocminfo's GPU agents; {} without rocminfo.  `text`:
+    rocminfo's output to read instead of running it (tests)."""
+    global _ROCMINFO
+    if text is None:
+        if _ROCMINFO is not None:
+            return _ROCMINFO
+        exe = next((p for p in (os.path.join(os.environ.get("ROCM_PATH") or "/opt/rocm", "bin", "rocminfo"),
+                                *ROCMINFO_PATHS) if os.path.isfile(p) and os.access(p, os.X_OK)), None)
+        try:
+            text = subprocess.run([exe], capture_output=True, text=True, timeout=20,
+                                  stdin=subprocess.DEVNULL).stdout if exe else ""
+        except (OSError, subprocess.SubprocessError):
+            text = ""
+    names = {}
+    for agent in re.split(r"(?m)^\s*Agent \d+\s*$", text):
+        f = {}
+        for line in agent.splitlines():
+            k, sep, v = line.partition(":")
+            if sep and k.strip() not in f:               # (an agent's first of each: its ISA lines repeat Name)
+                f[k.strip()] = v.strip()
+        if f.get("Device Type") == "GPU" and f.get("Marketing Name") and (f.get("BDFID") or "").isdigit():
+            names[int(f["BDFID"])] = f["Marketing Name"]
+    if not text or names:
+        _ROCMINFO = names
+    return names
+
+
+def pci_ids_name(vendor: int, device: int, paths=None):
+    """The PCI ID list's name of a device ("Navi 48 [Radeon AI PRO R9700]" -> "AMD Radeon AI PRO R9700"; a list of
+    several names in its brackets, one chip sold as several cards, keeps the chip's: "AMD Strix Halo"), or None."""
+    want_v, want_d = f"{vendor:04x}", f"{device:04x}"
+    for path in paths or PCI_IDS:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                inside = False
+                for line in f:
+                    if line[:1] not in ("\t", "#") and line.strip():
+                        if inside:
+                            break                           # (the next vendor: not listed)
+                        inside = line[:4].lower() == want_v
+                    elif inside and line.startswith("\t") and not line.startswith("\t\t") \
+                            and line[1:5].lower() == want_d:
+                        name = line[5:].strip()
+                        m = re.match(r"^(.*?)\s*\[(.*)\]$", name)
+                        if m and "/" not in m.group(2):
+                            name = m.group(2)
+                        elif m:
+                            name = m.group(1)
+                        return f"AMD {name}" if vendor == 0x1002 and not name.startswith(("AMD", "ATI")) else name
+        except OSError:
+            continue
+    return None
 
 
 class _Amd:
@@ -671,6 +741,7 @@ class _Amd:
 
     def __init__(self, index=0, sysfs=None):
         self.dev = amd_device_dir(index, sysfs)
+        self.node = amd_node(index, sysfs) or {}
         self.hwmon = None
         if self.dev:
             try:
@@ -691,11 +762,21 @@ class _Amd:
             return None
 
     def name(self):
+        """The driver's product_name; without one (an R9700, a Radeon 8060S), rocminfo's name for the card's PCI
+        location, then the PCI ID list's for its device id - "AMD Radeon" when none knows it."""
         try:
             with open(os.path.join(self.dev, "product_name"), encoding="utf-8") as f:
-                return f.read().strip() or "AMD Radeon"
+                name = f.read().strip()
+            if name:
+                return name
         except (OSError, TypeError):
-            return "AMD Radeon"
+            pass
+        try:
+            loc, dev, ven = (int(self.node.get(k) or 0) for k in ("location_id", "device_id", "vendor_id"))
+        except ValueError:
+            loc = dev = ven = 0
+        return (rocminfo_names().get(loc) if loc else None) or \
+            (pci_ids_name(ven or 0x1002, dev) if dev else None) or "AMD Radeon"
 
     def pci(self):
         """The card's own PCI address as _Nvml's "0000:03:00" (domain:bus:device, what the GPU map matches the engine's

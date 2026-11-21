@@ -268,6 +268,24 @@ def tiers_sub(m: dict) -> Text:
                 f"italic {FAINT}")
 
 
+def short_name(name: str) -> str:
+    """A GPU's name for a narrow column: the maker and the needless words left out ("AMD Radeon 8060S Graphics" ->
+    "Radeon 8060S", "NVIDIA GeForce RTX 3090" -> "RTX 3090")."""
+    for w in ("NVIDIA ", "GeForce ", "AMD "):
+        name = name.replace(w, "")
+    return name.replace(" Graphics", "").strip()
+
+
+def gpu_names(m) -> dict:
+    """{a GPU's index as the server numbers it (HIP's / CUDA's, as the engine's CUDA<n> and the start's GPU list):
+    its short name} from /metrics, or {} before the first reading."""
+    hw, st = (m or {}).get("hardware") or {}, (m or {}).get("hardware_static") or {}
+    cards, names = hw.get("gpus") or [], (st.get("gpu_name") or "").split(" + ")
+    if len(names) != len(cards):
+        return {}
+    return {str(g.get("index")): short_name(n) for g, n in zip(cards, names) if n and n != "?"}
+
+
 def gpus(m: dict) -> Table:
     """One row a GPU: its load, memory, power, temperature and PCIe link (the Monitor's GPUs table)."""
     hw, st = m.get("hardware") or {}, m.get("hardware_static") or {}
@@ -281,8 +299,7 @@ def gpus(m: dict) -> Table:
                        ("PCIe", True)):
         t.add_column(col, justify="right" if right else "left", no_wrap=True)
     for i, g in enumerate(cards):
-        name = names[i] if len(names) == len(cards) else ""
-        name = name.replace("NVIDIA ", "").replace("GeForce ", "").replace("AMD ", "").replace("Radeon ", "")
+        name = short_name(names[i]) if len(names) == len(cards) else ""
         util, temp = g.get("util"), g.get("temp")
         gen = g.get("pcie_gen_max") or g.get("pcie_gen")
         rx = g.get("pcie_rx_mb")
@@ -383,13 +400,17 @@ def banners(m: dict, fails: int) -> Text:
     return Text("\n").join(Text.assemble(("! ", f"bold {tone}"), (msg, tone)) for msg, tone in out)
 
 
-def loading(w: LoadWatch, width: int):
-    """The box while the model loads: the share in big, what the engine does now, the time, and each GPU's part."""
+def loading(w: LoadWatch, width: int, names=None):
+    """The box while the model loads: the share in big, what the engine does now, the time, and each GPU's part.
+    names: gpu_names() of the latest /metrics - each GPU then shown by name too ("GPU 1 · Radeon 8060S")."""
     frac, took = w.fraction(), time.monotonic() - w.t0
-    n, parts = len(w.gpus), w.parts
+    n, parts, names = len(w.gpus), w.parts, names or {}
 
     def gpu(k):
-        return f"GPU {w.gpus[k]}" if k < n else f"part {k + 1}"
+        if k >= n:
+            return f"part {k + 1}"
+        name = names.get(str(w.gpus[k]))
+        return f"GPU {w.gpus[k]}" + (f" · {name}" if name else "")
     now = [k for k in sorted(parts) if parts[k][0] < parts[k][1]]   # (the GPU warming now; before it starts: the next)
     if not parts:
         what = "reading the model's weights"
@@ -411,8 +432,8 @@ def loading(w: LoadWatch, width: int):
     for k in range(max(n, len(parts))):
         done, whole = parts.get(k, (0.0, 0.0))
         state = Text("waiting", FAINT) if k not in parts else \
-            Text.assemble(("✓ ", OK), (f"{fmt(whole, 1)} GB", INK)) if done >= whole else \
-            Text(f"{fmt(done, 1)} of {fmt(whole, 1)} GB", INK)
+            Text.assemble(("✓ ", OK), (f"{fmt(whole, 1)} GB", INK), (" of experts", MUTED)) if done >= whole else \
+            Text.assemble(("experts ", MUTED), (f"{fmt(done, 1)} of {fmt(whole, 1)} GB", INK))
         rows.add_row(Text(gpu(k), INK if k in parts else MUTED), bar(done / whole if whole else 0.0, 24), state)
     return Group(*lines, Text(""), bar(frac, width), Text(""), rows, Text(""),
                  Text("The engine reads the experts into RAM and VRAM: the PC can be slow until the model is ready.",
@@ -490,7 +511,7 @@ class Dashboard(VerticalScroll):
             self.load.read()
             self.query_one("#dash-banner").display = False
             width = min(84, self.size.width - 12)
-            self.query_one("#dash-load", Static).update(loading(self.load, width))
+            self.query_one("#dash-load", Static).update(loading(self.load, width, gpu_names(self.metrics)))
             return
         m = self.metrics
         if m is None or (m is self.drawn and self.fails < 3):

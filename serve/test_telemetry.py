@@ -460,6 +460,64 @@ class AmdSysfs(unittest.TestCase):
         self.assertEqual(t.static["gpu_name"], "Fake V100")
 
 
+class AmdNames(unittest.TestCase):
+    """An AMD card whose driver has no product_name (an R9700, a Radeon 8060S): named by rocminfo for its PCI location
+    (KFD's location_id = rocminfo's BDFID), whatever order the cards come in, else by the PCI ID list."""
+
+    ROCMINFO = ("*******\nAgent 1\n*******\n  Name: cpu\n  Marketing Name: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S\n"
+                "  Device Type: CPU\n  BDFID: 0\n*******\nAgent 2\n*******\n  Name: gfx1201\n"
+                "  Marketing Name: AMD Radeon AI PRO R9700\n  Device Type: GPU\n  BDFID: 26368\n  ISA 1\n"
+                "    Name: amdgcn-amd-amdhsa--gfx1201\n*******\nAgent 3\n*******\n  Name: gfx1151\n"
+                "  Marketing Name: AMD Radeon 8060S Graphics\n  Device Type: GPU\n  BDFID: 49152\n")
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.sysfs = str(root)
+        nodes = root / "class/kfd/kfd/topology/nodes"
+        # (the 8060S first this time: HIP's 0 - the names must follow the cards, not the positions)
+        for n, (props) in enumerate(["simd_count 0\ngfx_target_version 0\n",
+                                     "simd_count 80\ngfx_target_version 110501\ndrm_render_minor 129\n"
+                                     "device_id 5510\nvendor_id 4098\nlocation_id 49152\n",
+                                     "simd_count 128\ngfx_target_version 120001\ndrm_render_minor 128\n"
+                                     "device_id 30033\nvendor_id 4098\nlocation_id 26368\n"]):
+            (nodes / str(n)).mkdir(parents=True)
+            (nodes / str(n) / "properties").write_text(props, encoding="utf-8")
+        for minor in (128, 129):                           # (no product_name: the driver has none for them)
+            d = root / f"class/drm/renderD{minor}/device"
+            d.mkdir(parents=True)
+            (d / "gpu_busy_percent").write_text("1", encoding="utf-8")
+        self.ids = root / "pci.ids"
+        self.ids.write_text("1002  Advanced Micro Devices, Inc. [AMD/ATI]\n"
+                            "\t1586  Strix Halo [Radeon Graphics / Radeon 8050S Graphics / Radeon 8060S Graphics]\n"
+                            "\t7551  Navi 48 [Radeon AI PRO R9700]\n\t\t1002 7551  a subsystem\n"
+                            "8086  Intel Corporation\n\t1586  Ethernet Controller X710 for 10GBASE-T\n",
+                            encoding="utf-8")
+
+    def test_rocminfo_names_each_card_by_its_location(self):
+        with mock.patch.object(T, "SYSFS", self.sysfs), \
+                mock.patch.object(T, "rocminfo_names", return_value=T.rocminfo_names(self.ROCMINFO)):
+            self.assertEqual([T._Amd(i, self.sysfs).name() for i in (0, 1)],
+                             ["AMD Radeon 8060S Graphics", "AMD Radeon AI PRO R9700"])
+
+    def test_without_rocminfo_the_pci_id_list(self):
+        with mock.patch.object(T, "rocminfo_names", return_value={}), mock.patch.object(T, "PCI_IDS", (str(self.ids),)):
+            self.assertEqual([T._Amd(i, self.sysfs).name() for i in (0, 1)],
+                             ["AMD Strix Halo", "AMD Radeon AI PRO R9700"])
+
+    def test_the_pci_id_list_is_read_by_vendor(self):
+        self.assertEqual(T.pci_ids_name(0x8086, 0x1586, (str(self.ids),)), "Ethernet Controller X710 for 10GBASE-T")
+        self.assertIsNone(T.pci_ids_name(0x1002, 0x9999, (str(self.ids),)))
+
+    def test_nothing_known_is_amd_radeon(self):
+        with mock.patch.object(T, "rocminfo_names", return_value={}), \
+                mock.patch.object(T, "pci_ids_name", return_value=None):
+            self.assertEqual(T._Amd(0, self.sysfs).name(), "AMD Radeon")
+
+
+
 class AmdWindows(unittest.TestCase):
     """#102 (B): an AMD card on Windows, read from DXGI and Windows' GPU counters (_WinGpu; fake ones here - the
     real calls are checked on a Windows + AMD PC)."""

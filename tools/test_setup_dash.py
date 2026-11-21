@@ -285,6 +285,22 @@ class Loading(unittest.TestCase):
         w.reset()                                                   # (a reload: from 0% again)
         self.assertEqual(w.fraction(), 0.0)
 
+    def test_each_gpu_by_its_name(self):
+        """The names /metrics gives each GPU by its index (HIP's / CUDA's): the engine's CUDA0 here is GPU 3."""
+        w = self.watch(["glm fast: CUDA0 tiers warm: 2016 experts (20.0 GB) in 50 s (0.50 GB/s)",
+                        "glm fast: CUDA1 warming the expert tiers 50% (5.0 of 10.0 GB, 4 s)"])
+        out = text(D.loading(w, 80, {"3": "RTX 3090", "0": "Radeon 8060S"}))
+        for want in ("GPU 3 · RTX 3090", "Warming the experts on GPU 0 · Radeon 8060S (part 2 of 3)",
+                     "experts 5.0 of 10.0 GB", "✓ 20.0 GB of experts", "GPU 1"):
+            self.assertIn(want, out)
+        self.assertNotIn("GPU 1 ·", out)                            # (no name for it: the number alone)
+
+    def test_names_from_metrics(self):
+        self.assertEqual(D.gpu_names(METRICS), {"0": "RTX 5060 Ti", "1": "RTX 3090"})
+        self.assertEqual(D.gpu_names(None), {})
+        self.assertEqual(D.short_name("AMD Radeon 8060S Graphics"), "Radeon 8060S")
+        self.assertEqual(D.short_name("AMD Radeon AI PRO R9700"), "Radeon AI PRO R9700")
+
     def test_a_gpu_not_started_yet_counts_by_its_vram(self):  # (Maya-L on the 3090 + 8x 16 GB: 148.3 GB, never 225)
         gpus, vram = [3, 0, 1, 2, 4, 5, 6, 7, 8], {3: 24.0, **{g: 16.0 for g in (0, 1, 2, 4, 5, 6, 7, 8)}}
         w = self.watch(["glm fast: CUDA0 tiers warm: 2016 experts (25.0 GB) in 50 s (0.50 GB/s)"], gpus, vram)
